@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_restx import Api, Resource, fields
+from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Load environment variables first
@@ -9,6 +10,9 @@ load_dotenv()
 from workflow import Workflow
 
 app = Flask(__name__)
+# Enable CORS for all routes and origins
+CORS(app, resources={r"/*": {"origins": "*"}})
+
 api = Api(
     app,
     version='1.0',
@@ -31,7 +35,8 @@ chat_request_model = api.model('ChatRequest', {
 chat_response_model = api.model('ChatResponse', {
     'response': fields.String(description='Agent response to the user message'),
     'reasoning': fields.Raw(description='Tool outputs and reasoning from the agent'),
-    'history': fields.Raw(description='Conversation history')
+    'history': fields.Raw(description='Conversation history'),
+    'agent_response': fields.Raw(description='Structured agent response with thinking, function calls, and final response')
 })
 
 error_model = api.model('Error', {
@@ -70,7 +75,8 @@ class Chat(Resource):
             return {
                 "response": result.final_response,
                 "reasoning": result.tool_outputs,
-                "history": result.conversation_history
+                "history": result.conversation_history,
+                "agent_response": result.agent_response
             }
         except Exception as e:
             api.abort(500, f'Internal server error: {str(e)}')

@@ -1,4 +1,5 @@
 from .agent import Agent
+from .output_parser import AgentResponse, FunctionCall
 
 class Workflow:
     def __init__(self):
@@ -9,10 +10,62 @@ class Workflow:
         state = {"input": user_input}
         result = self.agent.process_input(state)
         
+        # Use the function_calls directly if available, otherwise convert from tool_calls
+        function_calls = []
+        if "function_calls" in result and result["function_calls"]:
+            # Use the pre-formatted function calls
+            for call in result["function_calls"]:
+                function_calls.append(FunctionCall(
+                    tool=call["tool"],
+                    parameters=call["parameters"]
+                ))
+        else:
+            # Fall back to converting from tool_calls
+            for step in result["tool_calls"]:
+                function_calls.append(FunctionCall(
+                    tool=step["action"],
+                    parameters={"input": step["action_input"]} if isinstance(step["action_input"], str) else step["action_input"]
+                ))
+        
+        # Create the AgentResponse object
+        agent_response = AgentResponse(
+            thinking=result["reasoning"],
+            function_calls=function_calls,
+            response=result["response"]
+        )
+        
         return {
-            "response": result["response"],
-            "reasoning": result["reasoning"],
-            "conversation_history": self.agent.conversation_history
+            "agent_response": agent_response,
+            "raw_response": result,
+            "conversation_history": self.agent.memory.chat_memory.messages if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") else []
         }
+        
+    def execute(self, user_input: str):
+        # Method to match the app.py implementation
+        result = self.execute_workflow(user_input)
+        
+        # Create a result object with the expected attributes
+        class ResultObject:
+            def __init__(self, final_response, tool_outputs, conversation_history, agent_response):
+                self.final_response = final_response
+                self.tool_outputs = tool_outputs
+                self.conversation_history = conversation_history
+                self.agent_response = agent_response
+        
+        # Convert LangChain message objects to serializable dictionaries
+        serializable_history = []
+        for message in result["conversation_history"]:
+            # Extract the content and type from each message object
+            serializable_history.append({
+                "type": message.__class__.__name__,
+                "content": message.content
+            })
+        
+        return ResultObject(
+            final_response=result["raw_response"]["response"],
+            tool_outputs={"reasoning": result["raw_response"]["reasoning"], "steps": result["raw_response"]["tool_calls"]},
+            conversation_history=serializable_history,
+            agent_response=result["agent_response"].model_dump()
+        )
 
 execute_workflow = Workflow().execute_workflow
