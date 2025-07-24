@@ -2,9 +2,30 @@ from .agent import Agent
 from .output_parser import AgentResponse, FunctionCall
 import json
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableLambda
 class Workflow:
     def __init__(self):
         self.agent = Agent()
+        
+        # Define a custom output formatter for structured response
+        def format_agent_output(result):
+            steps = result.get("intermediate_steps", [])
+            thinking = steps[0][0].log if steps else "No reasoning."
+            function_calls = [
+                {
+                    "tool": step[0].tool,
+                    "parameters": step[0].tool_input if isinstance(step[0].tool_input, dict) else {"input": step[0].tool_input}
+                }
+                for step in steps
+            ]
+            return {
+                "thinking": thinking,
+                "function_calls": function_calls,
+                "response": result["output"]
+            }
+        
+        # Create the Runnable chain by piping the agent executor through the formatter
+        self.agent_chain = self.agent.agent_executor | RunnableLambda(format_agent_output)
 
     def execute_workflow(self, user_input: str):
         # Simplified workflow execution
@@ -43,7 +64,23 @@ class Workflow:
         
     def invoke(self, user_input: str):
         # Method to match the app.py implementation - preferred in Langchain and Langgraph
-        result = self.execute_workflow(user_input)
+        # Use the Runnable chain to process the input
+        formatted_result = self.agent_chain.invoke({"input": user_input})
+        
+        # Create function calls from the formatted result
+        function_calls = []
+        for call in formatted_result["function_calls"]:
+            function_calls.append(FunctionCall(
+                tool=call["tool"],
+                parameters=call["parameters"]
+            ))
+        
+        # Create the AgentResponse object
+        agent_response = AgentResponse(
+            thinking=formatted_result["thinking"],
+            function_calls=function_calls,
+            response=formatted_result["response"]
+        )
         
         # Create a result object with the expected attributes
         class ResultObject:
@@ -55,7 +92,7 @@ class Workflow:
         
         # Convert LangChain message objects to serializable dictionaries
         serializable_history = []
-        for message in result["conversation_history"]:
+        for message in self.agent.memory.chat_memory.messages:
             # Extract the content and type from each message object
             serializable_history.append({
                 "type": message.__class__.__name__,
@@ -63,10 +100,10 @@ class Workflow:
             })
         
         return ResultObject(
-            final_response=result["raw_response"]["response"],
-            tool_outputs={"reasoning": result["raw_response"]["reasoning"], "steps": result["raw_response"]["tool_calls"]},
+            final_response=formatted_result["response"],
+            tool_outputs={"reasoning": formatted_result["thinking"], "steps": formatted_result["function_calls"]},
             conversation_history=serializable_history,
-            agent_response=result["agent_response"].model_dump()
+            agent_response=agent_response.model_dump()
         )
         
     def execute(self, user_input: str):
@@ -121,6 +158,27 @@ class Workflow:
             # Format the chunk based on its type
             formatted_chunk = self._format_chunk(mode, chunk)
             yield mode, formatted_chunk
+            
+    async def astream_tokens(self, user_input: str, callbacks=None):
+        """Asynchronously stream tokens using agent.ainvoke with callbacks.
+        
+        This method is designed to work with the StreamingHandler callback
+        to provide token-by-token streaming similar to the FastAPI example.
+        
+        Args:
+            user_input (str): The user's input message
+            callbacks (list): List of callback handlers including StreamingHandler
+                
+        Returns:
+            dict: The final result from the agent
+        """
+        from langchain_core.runnables import RunnableConfig
+        
+        # Create a config with the provided callbacks
+        config = RunnableConfig(callbacks=callbacks)
+        
+        # Run the agent asynchronously and return the final result
+        return await self.agent.agent_executor.ainvoke({"input": user_input}, config=config)
     
     def _format_chunk(self, mode, chunk):
         """Format a chunk based on its content.
