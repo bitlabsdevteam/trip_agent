@@ -40,8 +40,8 @@ class Workflow:
             "conversation_history": self.agent.memory.chat_memory.messages if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") else []
         }
         
-    def execute(self, user_input: str):
-        # Method to match the app.py implementation
+    def invoke(self, user_input: str):
+        # Method to match the app.py implementation - preferred in Langchain and Langgraph
         result = self.execute_workflow(user_input)
         
         # Create a result object with the expected attributes
@@ -67,5 +67,13 @@ class Workflow:
             conversation_history=serializable_history,
             agent_response=result["agent_response"].model_dump()
         )
+        
+    def execute(self, user_input: str):
+        # Legacy method, maintained for backward compatibility
+        # Use invoke() instead as it's the preferred method in Langchain and Langgraph
+        return self.invoke(user_input)
 
+# Export the invoke method as the preferred way to use this module
+invoke = Workflow().invoke
+# For backward compatibility
 execute_workflow = Workflow().execute_workflow

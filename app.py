@@ -71,7 +71,7 @@ class Chat(Resource):
             if not user_input or not user_input.strip():
                 api.abort(400, 'Message cannot be empty')
             
-            result = workflow.execute(user_input)
+            result = workflow.invoke(user_input)
             return {
                 "response": result.final_response,
                 "reasoning": result.tool_outputs,
