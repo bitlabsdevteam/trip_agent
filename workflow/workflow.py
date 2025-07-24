@@ -1,6 +1,7 @@
 from .agent import Agent
 from .output_parser import AgentResponse, FunctionCall
-
+import json
+from langchain_core.messages import HumanMessage
 class Workflow:
     def __init__(self):
         self.agent = Agent()
@@ -72,6 +73,94 @@ class Workflow:
         # Legacy method, maintained for backward compatibility
         # Use invoke() instead as it's the preferred method in Langchain and Langgraph
         return self.invoke(user_input)
+        
+    def stream(self, user_input: str, stream_mode=None):
+        """Stream the workflow execution results.
+        
+        Args:
+            user_input (str): The user's input message
+            stream_mode (str or list): Not used in this implementation, kept for API compatibility
+                
+        Yields:
+            tuple: (stream_mode, chunk) pairs where chunk is the streamed data
+        """
+        # Stream from the agent executor
+        for chunk in self.agent.agent_executor.stream(
+            {"input": user_input}
+        ):
+            # Determine the mode based on the chunk content
+            if "intermediate_steps" in chunk:
+                mode = "updates"
+            else:
+                mode = "messages"
+                
+            # Format the chunk based on its type
+            formatted_chunk = self._format_chunk(mode, chunk)
+            yield mode, formatted_chunk
+    
+    async def astream(self, user_input: str, stream_mode=None):
+        """Asynchronously stream the workflow execution results.
+        
+        Args:
+            user_input (str): The user's input message
+            stream_mode (str or list): Not used in this implementation, kept for API compatibility
+                
+        Yields:
+            tuple: (stream_mode, chunk) pairs where chunk is the streamed data
+        """
+        # Stream from the agent executor
+        async for chunk in self.agent.agent_executor.astream(
+            {"input": user_input}
+        ):
+            # Determine the mode based on the chunk content
+            if "intermediate_steps" in chunk:
+                mode = "updates"
+            else:
+                mode = "messages"
+                
+            # Format the chunk based on its type
+            formatted_chunk = self._format_chunk(mode, chunk)
+            yield mode, formatted_chunk
+    
+    def _format_chunk(self, mode, chunk):
+        """Format a chunk based on its content.
+        
+        Args:
+            mode (str): The determined mode ("updates" or "messages")
+            chunk: The chunk data
+            
+        Returns:
+            dict: A formatted representation of the chunk
+        """
+        if mode == "updates":
+            # Format update chunks (reasoning steps, tool calls, etc.)
+            if isinstance(chunk, dict) and "intermediate_steps" in chunk:
+                steps = chunk.get("intermediate_steps", [])
+                if steps:
+                    last_step = steps[-1]
+                    if isinstance(last_step, tuple) and len(last_step) >= 2:
+                        action = last_step[0]
+                        observation = last_step[1]
+                        
+                        if hasattr(action, "tool") and hasattr(action, "tool_input") and hasattr(action, "log"):
+                            return {
+                                "type": "tool_usage",
+                                "tool": action.tool,
+                                "input": action.tool_input,
+                                "thought": action.log
+                            }
+            return {"type": "thinking", "content": str(chunk)}
+        
+        elif mode == "messages":
+            # Format message chunks (LLM tokens)
+            if hasattr(chunk, "content"):
+                return {"type": "token", "content": chunk.content}
+            elif isinstance(chunk, dict) and "output" in chunk:
+                return {"type": "token", "content": chunk.get("output", "")}
+            return {"type": "token", "content": str(chunk)}
+        
+        # Default formatting for unknown modes
+        return {"type": "unknown", "content": str(chunk)}
 
 # Export the invoke method as the preferred way to use this module
 invoke = Workflow().invoke
