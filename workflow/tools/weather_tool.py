@@ -1,5 +1,7 @@
 """Weather Tool for LangChain.
 
+This tool potential to convert to a MCP call
+
 This module provides a tool to get weather information using the WeatherAPI.com API.
 """
 
@@ -19,7 +21,8 @@ class WeatherInput(BaseModel):
     country: Optional[str] = Field(None, description="The country code (optional)")
 
 class WeatherTool(BaseTool):
-    """Tool that gets weather data from WeatherAPI.com."""
+    """Tool that gets weather data from WeatherAPI.com.
+    """
     name: str = "weather"
     description: str = "Useful for getting current weather information for a specific city. Input should be a city name."
     args_schema: Type[BaseModel] = WeatherInput

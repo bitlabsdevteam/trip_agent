@@ -3,6 +3,7 @@ from flask_restx import Api, Resource, fields
 from flask_cors import CORS
 from dotenv import load_dotenv
 import json
+import os
 
 # Load environment variables first
 load_dotenv()

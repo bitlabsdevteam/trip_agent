@@ -1,5 +1,7 @@
 """City Facts Tool for LangChain.
 
+This tool potential to convert to a MCP call
+
 This module provides a tool to get facts about cities using the Wikipedia API.
 """
 
@@ -13,9 +15,10 @@ class CityFactsInput(BaseModel):
     city: str = Field(..., description="The city to get facts about")
 
 class CityFactsTool(BaseTool):
-    """Tool that gets facts about cities from Wikipedia."""
+    """Tool that gets facts about cities from Wikipedia.
+    """
     name: str = "city_facts"
-    description: str = "Useful for getting information and facts about a specific city. Input should be a city name."
+    description: str = "Useful for getting facts about a specific city. Input should be a city name."
     args_schema: Type[BaseModel] = CityFactsInput
     wiki: Any = None
     
@@ -60,16 +63,16 @@ class CityFactsTool(BaseTool):
 
 @tool
 def get_city_facts(city: str) -> Dict[str, Any]:
-    """Get facts and information about a specific city from Wikipedia.
+    """Get facts about a specific city.
     
     Args:
-        city: The city to get facts about
+        city: The city to get facts for
         
     Returns:
         Dict containing city information
     """
     city_facts_tool = CityFactsTool()
-    return city_facts_tool._run(city)
+    return city_facts_tool.invoke({"city": city})
 
 
 # Alternative implementation using LangChain's built-in WikipediaQueryRun tool

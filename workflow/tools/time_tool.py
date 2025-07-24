@@ -1,6 +1,8 @@
 """Time Tool for LangChain.
 
-This module provides a tool to get current time information for different cities.
+This tool potential to convert to a MCP call
+
+This module provides a tool to get current time information for cities.
 """
 
 import requests
@@ -39,7 +41,8 @@ class TimeInput(BaseModel):
     city: str = Field(..., description="The city to get time for")
 
 class TimeTool(BaseTool):
-    """Tool that gets current time information for a specific city."""
+    """Tool that gets current time information for cities.
+    """
     name: str = "time"
     description: str = "Useful for getting current time information for a specific city. Input should be a city name."
     args_schema: Type[BaseModel] = TimeInput
