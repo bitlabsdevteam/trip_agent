@@ -4,15 +4,10 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import json
 import os
-import asyncio
 import threading
+import asyncio
 from queue import Queue
 
-# Remove LangSmith imports as we've refactored to not use it
-# from langsmith import traceable
-# from langsmith.wrappers import wrap_openai
-# from openai import OpenAI
-# openai_client = wrap_openai(OpenAI())
 # Load environment variables first
 load_dotenv()
 
@@ -21,8 +16,8 @@ from workflow import Workflow
 from workflow.streaming_handler import get_streaming_handler
 
 app = Flask(__name__)
-# Enable CORS for all routes and origins
-CORS(app, resources={r"/*": {"origins": "*"}})
+# Enable CORS for all routes and origins with additional configuration
+CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True, allow_headers=["Content-Type", "Authorization", "Accept"], methods=["GET", "POST", "OPTIONS"])
 
 api = Api(
     app,
@@ -357,18 +352,31 @@ class StreamTokenByToken(Resource):
                     
                     if chunk["type"] == "thinking":
                         # Send thinking tokens individually
-                        yield f"data: {{\"event\": \"message\", \"data\": \"{chunk['content']}\"}}"
+                        event_data = {"event": "message", "data": chunk['content']}
+                        yield f"data: {json.dumps(event_data)}\n\n"
                     elif chunk["type"] == "token":
                         # Send response tokens individually
-                        yield f"data: {{\"event\": \"message\", \"data\": \"{chunk['content']}\"}}"
+                        event_data = {"event": "message", "data": chunk['content']}
+                        yield f"data: {json.dumps(event_data)}\n\n"
                     elif chunk["type"] == "tool_separator":
                         # Send tool separator
-                        yield f"data: {{\"event\": \"message\", \"data\": \"{chunk['content']}\"}}"
+                        event_data = {"event": "message", "data": chunk['content']}
+                        yield f"data: {json.dumps(event_data)}\n\n"
                     elif chunk["type"] == "error":
-                        yield f"data: {{\"event\": \"error\", \"data\": \"{chunk['content']}\"}}"
+                        event_data = {"event": "error", "data": chunk['content']}
+                        yield f"data: {json.dumps(event_data)}\n\n"
                     elif chunk["type"] == "final":
                         # Send a final answer marker
-                        yield f"data: {{\"event\": \"message\", \"data\": \"\\n\\n✅ Final Answer: {chunk['content']}\"}}"
+                        event_data = {"event": "message", "data": f"\n\n✅ Final Answer: {chunk['content']}"}
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                    elif chunk["type"] == "structured_output":
+                        # Send the initial structured output
+                        event_data = {"event": "structured_output", "data": chunk["content"]}
+                        yield f"data: {json.dumps(event_data)}\n\n"
+                    elif chunk["type"] == "structured_update":
+                        # Send structured updates as they come in
+                        event_data = {"event": "structured_update", "data": chunk["content"]}
+                        yield f"data: {json.dumps(event_data)}\n\n"
                 
             # Return a streaming response
             return Response(
@@ -394,4 +402,12 @@ class Health(Resource):
         return {'status': 'healthy', 'message': 'AI Agent Chat API is running'}
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Run the Flask API server')
+    parser.add_argument('--port', type=int, default=5000, help='Port to run the server on')
+    args = parser.parse_args()
+    
+    # Run the app on the specified port
+    app.run(debug=True, port=args.port)

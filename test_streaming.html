@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Token-by-Token Streaming Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #input-container {
+            margin-bottom: 20px;
+        }
+        #message-input {
+            width: 70%;
+            padding: 8px;
+        }
+        #send-button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #output-container {
+            display: flex;
+            gap: 20px;
+        }
+        .output-section {
+            flex: 1;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+            min-height: 300px;
+            overflow-y: auto;
+        }
+        h2 {
+            margin-top: 0;
+        }
+        pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        .function-call {
+            background-color: #f0f0f0;
+            padding: 8px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Token-by-Token Streaming Test</h1>
+    
+    <div id="input-container">
+        <input type="text" id="message-input" placeholder="Enter your message..." value="Tell me about the weather and time in Paris">
+        <button id="send-button">Send</button>
+    </div>
+    
+    <div id="output-container">
+        <div class="output-section">
+            <h2>Raw Stream</h2>
+            <pre id="raw-output"></pre>
+        </div>
+        <div class="output-section">
+            <h2>Structured Output</h2>
+            <div id="structured-output">
+                <div>
+                    <h3>Thinking</h3>
+                    <pre id="thinking-output"></pre>
+                </div>
+                <div>
+                    <h3>Function Calls</h3>
+                    <div id="function-calls"></div>
+                </div>
+                <div>
+                    <h3>Response</h3>
+                    <pre id="response-output"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('send-button').addEventListener('click', sendMessage);
+        document.getElementById('message-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            // Clear previous outputs
+            document.getElementById('raw-output').textContent = '';
+            document.getElementById('thinking-output').textContent = '';
+            document.getElementById('function-calls').innerHTML = '';
+            document.getElementById('response-output').textContent = '';
+            
+            // Disable input during processing
+            messageInput.disabled = true;
+            document.getElementById('send-button').disabled = true;
+            
+            // Create a new XMLHttpRequest for streaming
+            const xhr = new XMLHttpRequest();
+            console.log('Creating XMLHttpRequest');
+            xhr.open('POST', 'http://localhost:5002/api/v1/chat/stream_token_by_token', true);
+            console.log('Setting headers');
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            xhr.setRequestHeader('Accept', 'text/event-stream');
+            console.log('Headers set');
+            
+            // Set up event handling
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState > 2) {
+                    const rawOutput = document.getElementById('raw-output');
+                    
+                    // Process the response as it comes in
+                    const lines = xhr.responseText.split('\n');
+                    console.log('Response lines:', lines.length);
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            console.log('Processing line:', line);
+                            try {
+                                // Trim any whitespace before parsing JSON
+                                const jsonStr = line.substring(6).trim();
+                                const eventData = JSON.parse(jsonStr);
+                                
+                                if (eventData.event === 'message') {
+                                    rawOutput.textContent += eventData.data;
+                                } else if (eventData.event === 'structured_output' || eventData.event === 'structured_update') {
+                                    const data = eventData.data;
+                                    document.getElementById('thinking-output').textContent = data.thinking;
+                                    
+                                    // Display function calls
+                                    const functionCallsContainer = document.getElementById('function-calls');
+                                    functionCallsContainer.innerHTML = '';
+                                    data.function_calls.forEach(call => {
+                                        const callElement = document.createElement('div');
+                                        callElement.className = 'function-call';
+                                        callElement.textContent = `Tool: ${call.tool}\nParameters: ${JSON.stringify(call.parameters, null, 2)}`;
+                                        functionCallsContainer.appendChild(callElement);
+                                    });
+                                    
+                                    document.getElementById('response-output').textContent = data.response;
+                                } else if (eventData.event === 'error') {
+                                    rawOutput.textContent += '\nERROR: ' + eventData.data;
+                                }
+                            } catch (e) {
+                                console.error('Error parsing event data:', e);
+                                console.error('Problematic JSON string:', jsonStr);
+                                rawOutput.textContent += '\nError parsing event data: ' + e.message;
+                                rawOutput.textContent += '\nProblematic JSON string: ' + jsonStr;
+                            }
+                        }
+                    }
+                }
+            };
+            
+            xhr.onerror = function(e) {
+                console.error('Request error:', e);
+                console.error('XHR status:', xhr.status);
+                console.error('XHR statusText:', xhr.statusText);
+                document.getElementById('raw-output').textContent += '\nRequest error: ' + xhr.statusText;
+                messageInput.disabled = false;
+                document.getElementById('send-button').disabled = false;
+            };
+            
+            xhr.onload = function() {
+                if (xhr.status !== 200) {
+                    console.error('Request failed with status:', xhr.status);
+                    document.getElementById('raw-output').textContent += `\nRequest failed with status: ${xhr.status}`;
+                }
+                messageInput.disabled = false;
+                document.getElementById('send-button').disabled = false;
+            };
+            
+            // Send the request
+            console.log('Sending request with message:', message);
+            const payload = JSON.stringify({
+                message: message
+            });
+            console.log('Request payload:', payload);
+            try {
+                xhr.send(payload);
+                console.log('Request sent');
+            } catch (e) {
+                console.error('Error sending request:', e);
+                document.getElementById('raw-output').textContent += '\nError sending request: ' + e.message;
+            }
+        }
+    </script>
+</body>
+</html>

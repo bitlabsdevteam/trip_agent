@@ -6,7 +6,7 @@ import sys
 def test_streaming_api():
     """Test the streaming API endpoint"""
     # API endpoint URL
-    url = "http://localhost:5000/api/v1/chat/stream"
+    url = "http://localhost:5001/api/v1/chat/stream"
     
     # Message to send
     message = "What's the weather in Tokyo?"
@@ -54,7 +54,7 @@ def test_streaming_api():
 def test_token_streaming_api():
     """Test the token-only streaming API endpoint"""
     # API endpoint URL
-    url = "http://localhost:5000/api/v1/chat/stream_tokens"
+    url = "http://localhost:5001/api/v1/chat/stream_tokens"
     
     # Message to send
     message = "Tell me a joke about programming."
@@ -90,9 +90,51 @@ def test_token_streaming_api():
         print(f"Error: {response.status_code} - {response.text}")
 
 
+def test_token_by_token_streaming_api():
+    """Test the token-by-token streaming API endpoint"""
+    # API endpoint URL
+    url = 'http://localhost:5001/api/v1/chat/stream_token_by_token'
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream'
+    }
+    data = {
+        'message': 'Tell me about the weather and time in Paris'
+    }
+
+    print(f"Sending request to {url}...")
+    response = requests.post(url, headers=headers, json=data, stream=True)
+
+    print(f"Response status code: {response.status_code}")
+    print(f"Response headers: {response.headers}")
+
+    if response.status_code == 200:
+        print("\nStreaming response:")
+        for line in response.iter_lines():
+            if line:
+                decoded_line = line.decode('utf-8')
+                print(decoded_line)
+                
+                # Try to parse the data if it's in the expected format
+                if decoded_line.startswith('data: '):
+                    try:
+                        data_str = decoded_line[6:]
+                        data = json.loads(data_str)
+                        if 'event' in data and data['event'] in ['structured_output', 'structured_update']:
+                            print(f"\nReceived {data['event']}:")
+                            print(json.dumps(data['data'], indent=2))
+                    except json.JSONDecodeError:
+                        pass
+    else:
+        print(f"Error: {response.text}")
+
+
 if __name__ == "__main__":
     print("Testing the streaming API...\n")
     test_streaming_api()
     
     print("\n\nTesting the token-only streaming API...\n")
     test_token_streaming_api()
+    
+    print("\n\nTesting the token-by-token streaming API...\n")
+    test_token_by_token_streaming_api()
