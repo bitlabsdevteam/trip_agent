@@ -17,6 +17,7 @@ A smart agent application built with Flask and LangChain that provides travel-re
 - LangChain ReAct agent implementation
 - Multiple streaming options for real-time responses
 - Token-by-token streaming for a natural chat experience
+- Conversation summary memory for maintaining context in long conversations
 
 ## Project Structure
 
@@ -33,13 +34,18 @@ A smart agent application built with Flask and LangChain that provides travel-re
 
 ## Prerequisites
 
-- Python 3.8 or higher
+- Python 3.8 or higher (for local setup)
+- Node.js and npm (for local frontend setup)
 - API key for your chosen LLM provider:
   - OpenAI API key (for GPT-4o access) - default
   - Groq API key (for LLama3-70B access)
 - WeatherAPI.com API key (for weather data)
 
+Alternatively, you can use Docker to run the application without installing Python or Node.js locally. See the [Docker Setup](#docker-setup) section below.
+
 ## Setup
+
+### Local Setup
 
 1. Clone the repository:
    ```bash
@@ -245,6 +251,44 @@ for line in response.iter_lines():
 ### 4. Token-by-Token Streaming with Structured Updates (`/api/v1/chat/stream_token_by_token`)
 
 Provides a comprehensive streaming experience with structured updates including thinking process, function calls, and response tokens.
+
+## Docker Setup
+
+The application can be run using Docker and Docker Compose, which simplifies the setup process and ensures consistent behavior across different environments.
+
+### Prerequisites for Docker Setup
+
+- [Docker](https://docs.docker.com/get-docker/) installed on your system
+- [Docker Compose](https://docs.docker.com/compose/install/) installed on your system
+
+### Running with Docker
+
+1. Create a `.env` file in the root directory based on the `.env.example` file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit the `.env` file to add your API keys.
+
+3. Build and start the containers:
+   ```bash
+   docker-compose up --build
+   ```
+
+4. Access the application at http://localhost:3000
+
+5. To stop the application:
+   ```bash
+   docker-compose down
+   ```
+
+For more detailed information about the Docker setup, see the [DOCKER.md](DOCKER.md) file.
+
+## Conversation Memory
+
+This project implements a conversation summary memory system that allows the agent to maintain context over longer conversations. The memory system summarizes older interactions while keeping recent messages in full detail, providing a balance between context retention and token efficiency.
+
+For more information about the conversation memory implementation and how to use it, see the [CONVERSATION_MEMORY.md](CONVERSATION_MEMORY.md) file.
 
 ## Contributing
 

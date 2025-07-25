@@ -42,6 +42,7 @@ workflow = Workflow(
 
 # Define namespaces
 chat_ns = api.namespace('chat', description='Chat operations')
+memory_ns = api.namespace('memory', description='Conversation memory operations')
 
 # Define models for request/response documentation
 chat_request_model = api.model('ChatRequest', {
@@ -64,6 +65,12 @@ chat_response_model = api.model('ChatResponse', {
 error_model = api.model('Error', {
     'message': fields.String(description='Error message'),
     'status': fields.String(description='Error status')
+})
+
+# Define model for conversation summary response
+conversation_summary_model = api.model('ConversationSummary', {
+    'summary': fields.String(description='Summary of the conversation history'),
+    'recent_messages': fields.List(fields.Raw, description='Recent messages that have not been summarized yet')
 })
 
 @chat_ns.route('')
@@ -435,6 +442,92 @@ class StreamTokenByToken(Resource):
                     'Connection': 'keep-alive'
                 }
             )
+        except Exception as e:
+            api.abort(500, f'Internal server error: {str(e)}')
+
+# Add the conversation summary endpoint
+@memory_ns.route('/summary')
+class ConversationSummary(Resource):
+    @api.response(200, 'Success', conversation_summary_model)
+    @api.response(500, 'Internal Server Error', error_model)
+    @api.doc('get_conversation_summary')
+    def get(self):
+        """Get the current summary of the conversation history
+        
+        This endpoint returns the current summary of the conversation history
+        along with recent messages that have not been summarized yet.
+        
+        The summary is generated using the same LLM as the chat agent and
+        provides a concise overview of the conversation so far.
+        """
+        try:
+            # Get the conversation summary from the agent
+            summary_info = workflow.agent.get_conversation_summary()
+            
+            # Return the summary information
+            return summary_info
+        except Exception as e:
+            api.abort(500, f'Internal server error: {str(e)}')
+
+# Add endpoint to update the conversation summary
+@memory_ns.route('/update-summary')
+class UpdateSummary(Resource):
+    @api.response(200, 'Success', api.model('UpdateSummaryResponse', {
+        'summary': fields.String(description='The updated conversation summary')
+    }))
+    @api.response(500, 'Internal Server Error', error_model)
+    @api.doc('update_conversation_summary')
+    def post(self):
+        """Manually update the conversation summary
+        
+        This endpoint forces the agent to generate a new summary of the conversation
+        history. This can be useful when you want to explicitly update the summary
+        at specific points in the conversation.
+        """
+        try:
+            # Update the conversation summary
+            new_summary = workflow.agent.update_summary()
+            
+            # Return the new summary
+            return {'summary': new_summary}
+        except Exception as e:
+            api.abort(500, f'Internal server error: {str(e)}')
+
+# Add endpoint to set the maximum token limit for the conversation buffer
+@memory_ns.route('/token-limit')
+class TokenLimit(Resource):
+    @api.expect(api.model('TokenLimitRequest', {
+        'max_token_limit': fields.Integer(required=True, description='The maximum number of tokens to keep in the buffer', example=2000)
+    }))
+    @api.response(200, 'Success', api.model('TokenLimitResponse', {
+        'success': fields.Boolean(description='Whether the token limit was successfully set'),
+        'max_token_limit': fields.Integer(description='The new maximum token limit')
+    }))
+    @api.response(400, 'Bad Request', error_model)
+    @api.response(500, 'Internal Server Error', error_model)
+    @api.doc('set_token_limit')
+    def post(self):
+        """Set the maximum token limit for the conversation buffer
+        
+        This endpoint allows you to control how many tokens from recent conversations
+        are kept in full detail before being summarized. A higher limit means more
+        detailed context but uses more tokens.
+        """
+        try:
+            if not request.json or 'max_token_limit' not in request.json:
+                api.abort(400, 'Missing required field: max_token_limit')
+            
+            max_token_limit = request.json.get('max_token_limit')
+            if not isinstance(max_token_limit, int) or max_token_limit <= 0:
+                api.abort(400, 'max_token_limit must be a positive integer')
+            
+            # Set the maximum token limit
+            success = workflow.agent.set_max_token_limit(max_token_limit)
+            
+            if success:
+                return {'success': True, 'max_token_limit': max_token_limit}
+            else:
+                api.abort(500, 'Failed to set token limit')
         except Exception as e:
             api.abort(500, f'Internal server error: {str(e)}')
 

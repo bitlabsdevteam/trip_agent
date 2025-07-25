@@ -1,6 +1,6 @@
 from langchain.agents import create_react_agent, AgentExecutor
 from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferWindowMemory
+from langchain.memory import ConversationSummaryBufferMemory
 import os
 
 # Import the tools from the tools package
@@ -26,11 +26,14 @@ class Agent:
             **kwargs
         )
         
-        # Initialize memory for chat history with no window limit to remember all conversations
-        self.memory = ConversationBufferWindowMemory(
+        # Initialize memory with summary buffer to remember conversation history
+        # This combines buffer memory with summarization for better long-term retention
+        self.memory = ConversationSummaryBufferMemory(
+            llm=self.llm,  # Use the same LLM for summarization
             memory_key="chat_history",
             return_messages=True,
-            output_key="output"
+            output_key="output",
+            max_token_limit=2000  # Adjust token limit based on your needs
         )
         
         # Create the prompt template for the React agent using the Prompts class
@@ -60,6 +63,12 @@ class Agent:
         try:
             # Use the React agent to process the input
             result = self.agent_executor.invoke({"input": user_input})
+            
+            # Explicitly save the context to ensure the summary is updated
+            # This is redundant for the current interaction (already saved by invoke)
+            # but ensures the summary is properly maintained
+            output = result.get("output", "I couldn't process your request.")
+            self.memory.save_context({"input": user_input}, {"output": output})
             
             # Extract intermediate steps for transparency
             intermediate_steps = result.get("intermediate_steps", [])
@@ -145,3 +154,81 @@ class Agent:
     def execute_tools(self, state):
         # This method is kept for compatibility but not used with React agent
         return state
+    
+    def update_summary(self):
+        """Manually update the conversation summary.
+        
+        This method forces the memory to generate a new summary based on the current
+        conversation history. This can be useful for debugging or for explicitly
+        updating the summary at specific points.
+        
+        Returns:
+            str: The new summary
+        """
+
+        try:
+            # Get the current messages from chat history
+            messages = self.memory.chat_memory.messages
+            
+            # Get the current summary
+            previous_summary = self.memory.moving_summary_buffer
+            
+            # Predict a new summary
+            new_summary = self.memory.predict_new_summary(messages, previous_summary)
+            
+            # Update the moving summary buffer
+            self.memory.moving_summary_buffer = new_summary
+            
+            return new_summary
+        except Exception as e:
+            return f"Error updating summary: {str(e)}"
+    
+    def set_max_token_limit(self, max_token_limit):
+        """Set the maximum token limit for the conversation buffer.
+        
+        This controls how many tokens from recent conversations are kept in full detail
+        before being summarized. A higher limit means more detailed context but uses more tokens.
+        
+        Args:
+            max_token_limit (int): The maximum number of tokens to keep in the buffer
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            self.memory.max_token_limit = max_token_limit
+            # Force a pruning of the buffer to apply the new limit
+            self.memory.prune()
+            return True
+        except Exception as e:
+            print(f"Error setting max token limit: {str(e)}")
+            return False
+        
+    def get_conversation_summary(self):
+        """Get the current summary of the conversation history.
+        
+        Returns:
+            dict: A dictionary containing the conversation summary and/or recent messages
+        """
+
+        try:
+            # Load memory variables which will contain the summary and recent messages
+            memory_vars = self.memory.load_memory_variables({})
+            
+            # If using return_messages=True, we'll get a list of message objects
+            if self.memory.return_messages:
+                # Extract the conversation summary from the moving_summary_buffer
+                summary = self.memory.moving_summary_buffer
+                
+                # Get the recent messages that haven't been summarized yet
+                recent_messages = memory_vars.get("chat_history", [])
+                
+                return {
+                    "summary": summary,
+                    "recent_messages": recent_messages
+                }
+            else:
+                # If not using message objects, just return the history string
+                return {"history": memory_vars.get("chat_history", "")}
+        except Exception as e:
+            return {"error": f"Error retrieving conversation summary: {str(e)}"}

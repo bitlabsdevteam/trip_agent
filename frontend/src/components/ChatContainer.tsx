@@ -5,6 +5,7 @@ import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import { useChat } from '@/hooks/useChat';
 import LoadingSpinner from './LoadingSpinner';
+import ConversationSummary from './ConversationSummary';
 
 export const ChatContainer: React.FC = () => {
   const { 
@@ -13,10 +14,16 @@ export const ChatContainer: React.FC = () => {
     currentAssistantMessage, 
     sendMessage, 
     stopGenerating,
-    clearMessages 
+    clearMessages,
+    conversationSummary,
+    isSummaryLoading,
+    updateSummary,
+    setMaxTokenLimit
   } = useChat({
     onError: (error) => console.error('Chat error:', error)
   });
+  
+  const [showSummary, setShowSummary] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isClient, setIsClient] = useState(false);
@@ -35,15 +42,34 @@ export const ChatContainer: React.FC = () => {
     <div className="flex flex-col h-full max-w-4xl mx-auto p-4">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold">Conversation</h2>
-        {isClient && messages.length > 0 && (
-          <button
-            onClick={clearMessages}
-            className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
-          >
-            Clear chat
-          </button>
-        )}
+        <div className="flex space-x-3">
+          {isClient && (
+            <button
+              onClick={() => setShowSummary(!showSummary)}
+              className="text-sm text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              {showSummary ? 'Hide Memory' : 'Show Memory'}
+            </button>
+          )}
+          {isClient && messages.length > 0 && (
+            <button
+              onClick={clearMessages}
+              className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
+            >
+              Clear chat
+            </button>
+          )}
+        </div>
       </div>
+      
+      {isClient && showSummary && (
+        <ConversationSummary
+          summary={conversationSummary}
+          isLoading={isSummaryLoading}
+          onUpdateSummary={updateSummary}
+          onSetMaxTokenLimit={setMaxTokenLimit}
+        />
+      )}
       
       <div className="flex-grow overflow-y-auto mb-4 space-y-4 p-2">
         {isClient && messages.length === 0 ? (

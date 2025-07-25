@@ -12,6 +12,14 @@ export interface Message {
   id?: string; // Optional ID for message identification
 }
 
+export interface ConversationSummary {
+  summary: string;
+  recent_messages: {
+    type: string;
+    content: string;
+  }[];
+}
+
 export interface UseChatOptions {
   onError?: (error: Error) => void;
   initialMessages?: Message[];
@@ -40,6 +48,8 @@ export function useChat(options: UseChatOptions = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [thinkingMessages, setThinkingMessages] = useState<Message[]>([]);
+  const [conversationSummary, setConversationSummary] = useState<ConversationSummary | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Save messages to localStorage whenever they change
@@ -309,6 +319,7 @@ export function useChat(options: UseChatOptions = {}) {
     setMessages([]);
     setCurrentAssistantMessage('');
     setThinkingMessages([]);
+    setConversationSummary(null);
     // Also clear localStorage
     if (typeof window !== 'undefined') {
       localStorage.removeItem('chatMessages');
@@ -326,14 +337,106 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, [userInput, isLoading, sendMessage]);
 
+  // Function to fetch the conversation summary
+  const fetchSummary = useCallback(async () => {
+    setIsSummaryLoading(true);
+    try {
+      const response = await fetch('/api/memory', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      setConversationSummary(data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching conversation summary:', error);
+      options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      return null;
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  }, [options]);
+
+  // Function to manually update the conversation summary
+  const updateSummary = useCallback(async () => {
+    setIsSummaryLoading(true);
+    try {
+      const response = await fetch('/api/memory/update-summary', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // After updating, fetch the full summary to get both summary and recent messages
+      await fetchSummary();
+      return data.summary;
+    } catch (error) {
+      console.error('Error updating conversation summary:', error);
+      options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      return null;
+    } finally {
+      setIsSummaryLoading(false);
+    }
+  }, [fetchSummary, options]);
+
+  // Function to set the maximum token limit
+  const setMaxTokenLimit = useCallback(async (maxTokenLimit: number) => {
+    try {
+      const response = await fetch('/api/memory/token-limit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ max_token_limit: maxTokenLimit }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.success;
+    } catch (error) {
+      console.error('Error setting max token limit:', error);
+      options.onError?.(error instanceof Error ? error : new Error(String(error)));
+      return false;
+    }
+  }, [options]);
+
+  // Fetch summary after sending a message
+  useEffect(() => {
+    // Only fetch if there are messages and we're not currently loading a response
+    if (messages.length > 0 && !isLoading) {
+      fetchSummary();
+    }
+  }, [messages, isLoading, fetchSummary]);
+
   return {
     messages,
     isLoading,
     currentAssistantMessage,
     thinkingMessages,
+    conversationSummary,
+    isSummaryLoading,
     sendMessage,
     stopGenerating,
     clearMessages,
+    fetchSummary,
+    updateSummary,
+    setMaxTokenLimit,
     userInput,
     setUserInput,
     handleSubmit,

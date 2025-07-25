@@ -4,7 +4,7 @@ import json
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnableLambda
 class Workflow:
-    def __init__(self, provider="groq", model_name=None, temperature=0.7, **kwargs):
+    def __init__(self, provider="openai", model_name=None, temperature=0.7, **kwargs):
         """Initialize the Workflow with a configurable Agent.
         
         Args:

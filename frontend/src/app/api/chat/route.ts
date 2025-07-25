@@ -6,7 +6,9 @@ export async function POST(request: NextRequest) {
     
     // Forward the request to the Flask backend
     // Using stream_token_by_token endpoint for token-by-token streaming
-    const response = await fetch('http://localhost:5001/api/v1/chat/stream_token_by_token', {
+    // Use environment variable for API URL or fallback to localhost for development
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
+    const response = await fetch(`${apiUrl}/api/v1/chat/stream_token_by_token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
