@@ -1,12 +1,12 @@
 # Trip Agent
 
-A smart agent application built with Flask and LangChain that provides travel-related information using OpenAI's GPT-4o model. The agent can retrieve weather information, time data, and city facts through specialized tools, offering a comprehensive travel assistant experience.
+A smart agent application built with Flask and LangChain that provides travel-related information using multiple LLM providers. The agent can retrieve weather information, time data, and city facts through specialized tools, offering a comprehensive travel assistant experience.
 
 ## Features
 
-- Interactive chat interface with a GPT-4o powered agent (default)
+- Interactive chat interface with AI-powered agent
 - Flexible LLM integration with support for multiple providers:
-  - OpenAI (GPT-4o, GPT-4, etc.)
+  - OpenAI (GPT-4o, GPT-4, etc.) - default
   - Groq (LLama3-70B, etc.)
   - Google (Gemini Pro, etc.)
 - Specialized tools for retrieving:
@@ -34,7 +34,9 @@ A smart agent application built with Flask and LangChain that provides travel-re
 ## Prerequisites
 
 - Python 3.8 or higher
-- OpenAI API key (for GPT-4o access)
+- API key for your chosen LLM provider:
+  - OpenAI API key (for GPT-4o access) - default
+  - Groq API key (for LLama3-70B access)
 - WeatherAPI.com API key (for weather data)
 
 ## Setup
@@ -65,12 +67,12 @@ A smart agent application built with Flask and LangChain that provides travel-re
    Add the following variables to your `.env` file:
    ```
    # Required API Keys
-   OPENAI_API_KEY=your_openai_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here  # If using OpenAI
+   GROQ_API_KEY=your_groq_api_key_here      # If using Groq
    WEATHER_API_KEY=your_weather_api_key_here
    
    # Optional API Keys
    GOOGLE_API_KEY=your_google_api_key_here
-   GROQ_API_KEY=your_groq_api_key_here
    HUGGINGFACE_API_KEY=your_huggingface_api_key_here
    
    # LLM Configuration
@@ -80,6 +82,10 @@ A smart agent application built with Flask and LangChain that provides travel-re
    LLM_MODEL=gpt-4o
    # Temperature for the LLM (0.0 to 1.0)
    LLM_TEMPERATURE=0.7
+=======
+   OPENAI_API_KEY=your_openai_api_key_here
+   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+>>>>>>> origin/main
    ```
 
 5. Run the Flask app:
@@ -91,6 +97,7 @@ A smart agent application built with Flask and LangChain that provides travel-re
    - API Documentation: http://localhost:5001/docs/
    - Test HTML Interface: http://localhost:5001/test_streaming.html
 
+<<<<<<< HEAD
 ## LLM Configuration
 
 The application supports multiple LLM providers through a factory design pattern. You can configure the LLM provider, model, and temperature in your `.env` file:
@@ -119,6 +126,8 @@ LLM_TEMPERATURE=0.7  # Temperature (0.0 to 1.0)
    - Other options: `gemini-pro`, etc.
    - Requires: `GOOGLE_API_KEY`
 
+=======
+>>>>>>> origin/main
 ## Testing
 
 ### Running the Test Server
@@ -138,6 +147,7 @@ You can use the provided test script to test the streaming API:
 ```bash
 python test_streaming.py
 ```
+<<<<<<< HEAD
 
 ### Testing Different LLM Providers
 
@@ -148,6 +158,8 @@ python test_llm_providers.py
 ```
 
 This script will test the default OpenAI provider and any other providers for which you have configured API keys in your `.env` file.
+=======
+>>>>>>> origin/main
 
 ## API Endpoints
 
@@ -155,7 +167,11 @@ This script will test the default OpenAI provider and any other providers for wh
 - `GET /api/v1/health` - Health check endpoint
 
 ### Chat Endpoints
+<<<<<<< HEAD
 - `POST /api/v1/chat` - Chat with the GPT-4o powered agent
+=======
+- `POST /api/v1/chat` - Chat with the LLama3-70B powered agent
+>>>>>>> origin/main
 - `POST /api/v1/chat/stream` - Stream real-time updates from the agent (synchronous)
 - `POST /api/v1/chat/astream` - Stream real-time updates from the agent (asynchronous)
 - `POST /api/v1/chat/stream_tokens` - Stream only the final response tokens (ChatGPT-like experience)
