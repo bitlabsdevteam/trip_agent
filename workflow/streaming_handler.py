@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional, Union
 import asyncio
 import json
 import re
+from langchain_core.messages import HumanMessage, AIMessage
 
 class StreamingHandler(BaseCallbackHandler):
     """Callback handler for streaming tokens and agent steps.
@@ -11,13 +12,14 @@ class StreamingHandler(BaseCallbackHandler):
     making them available through an async iterator.
     """
     
-    def __init__(self):
+    def __init__(self, agent=None):
         self.tokens = []
         self.queue = asyncio.Queue()
         self.current_section = "thinking"  # thinking, tool, response
         self.function_calls = []
         self.thinking_buffer = ""
         self.response_buffer = ""
+        self.agent = agent  # Store reference to the agent
         
     async def on_llm_start(self, *args, **kwargs):
         """Run when LLM starts generating."""
@@ -97,6 +99,11 @@ class StreamingHandler(BaseCallbackHandler):
             final_answer = outputs["output"]
             # Store the final answer in the response buffer
             self.response_buffer = final_answer
+            
+            # Get the last message from the conversation history
+            from langchain_core.messages import AIMessage
+            if hasattr(self, 'agent') and hasattr(self.agent, 'memory') and hasattr(self.agent.memory, 'chat_memory'):
+                self.agent.memory.chat_memory.add_message(AIMessage(content=final_answer))
         
         # When the chain ends, we can send the structured format
         structured_output = {
@@ -112,7 +119,29 @@ class StreamingHandler(BaseCallbackHandler):
         
     async def on_chain_error(self, error: Union[Exception, KeyboardInterrupt], **kwargs):
         """Run when chain errors."""
-        await self.queue.put({"type": "error", "content": self._escape_special_chars(str(error))})
+        error_str = str(error)
+        await self.queue.put({"type": "error", "content": self._escape_special_chars(error_str)})
+        
+        # Check if this is a parsing error and try to extract the content
+        if "Could not parse LLM output" in error_str:
+            # Try to extract the actual content from the error message
+            import re
+            match = re.search(r'Could not parse LLM output: `(.+)`', error_str)
+            if match and match[1]:
+                # Extract the actual content from the error message
+                content = match[1]
+                self.response_buffer = content
+                
+                # Send the extracted content as a structured output
+                structured_output = {
+                    "type": "structured_output",
+                    "content": {
+                        "thinking": self.thinking_buffer.strip(),
+                        "function_calls": self.function_calls,
+                        "response": content.strip()
+                    }
+                }
+                await self.queue.put(structured_output)
     
     def _escape_special_chars(self, text):
         """Escape special characters for JSON."""
@@ -133,13 +162,16 @@ class StreamingHandler(BaseCallbackHandler):
             except asyncio.CancelledError:
                 break
 
-def get_streaming_handler():
+def get_streaming_handler(agent=None):
     """Create and return a new StreamingHandler instance.
     
     This function is used to create a new StreamingHandler for each request,
     ensuring that each client gets their own isolated stream of tokens.
     
+    Args:
+        agent: Optional reference to the Agent instance for accessing chat history
+    
     Returns:
-        StreamingHandler: A new instance of the StreamingHandler.
+        StreamingHandler: A new instance of the StreamingHandler with agent reference.
     """
-    return StreamingHandler()
+    return StreamingHandler(agent=agent)

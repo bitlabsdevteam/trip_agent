@@ -1,5 +1,4 @@
 from langchain.agents import create_react_agent, AgentExecutor
-from langchain_groq import ChatGroq
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
 import os
@@ -7,23 +6,31 @@ import os
 # Import the tools from the tools package
 from .tools import tools
 from .prompts import Prompts
+from .llm_factory import LLMFactory
 
 class Agent:
-    def __init__(self):
-        # Initialize the LLM with Groq
+    def __init__(self, provider="openai", model_name=None, temperature=0.7, **kwargs):
+        """Initialize the Agent with a configurable LLM.
         
-        self.llm = ChatGroq(
-            model="llama3-70b-8192",
-            temperature=0.7,
-            groq_api_key=os.getenv("GROQ_API_KEY")
+        Args:
+            provider: The LLM provider (openai, groq, google)
+            model_name: The specific model name to use (defaults to provider's default)
+            temperature: The temperature for the LLM
+            **kwargs: Additional arguments to pass to the LLM constructor
+        """
+        # Initialize the LLM using the factory
+        self.llm = LLMFactory.create_llm(
+            provider=provider,
+            model_name=model_name,
+            temperature=temperature,
+            **kwargs
         )
         
-        # Initialize memory
+        # Initialize memory for chat history with no window limit to remember all conversations
         self.memory = ConversationBufferWindowMemory(
             memory_key="chat_history",
-            output_key="output",  # Explicitly set output_key to resolve warning
-            k=5,
-            return_messages=True
+            return_messages=True,
+            output_key="output"
         )
         
         # Create the prompt template for the React agent using the Prompts class

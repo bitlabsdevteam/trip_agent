@@ -28,7 +28,17 @@ api = Api(
     prefix='/api/v1'
 )
 
-workflow = Workflow()
+# Get LLM configuration from environment variables or use defaults
+llm_provider = os.getenv("LLM_PROVIDER", "openai")  # Default to OpenAI
+llm_model = os.getenv("LLM_MODEL", "gpt-4o")  # Default to GPT-4o
+llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))  # Default temperature
+
+# Initialize the workflow with the configured LLM
+workflow = Workflow(
+    provider=llm_provider,
+    model_name=llm_model,
+    temperature=llm_temperature
+)
 
 # Define namespaces
 chat_ns = api.namespace('chat', description='Chat operations')
@@ -164,7 +174,7 @@ class AsyncStreamChat(Resource):
     @api.response(400, 'Bad Request', error_model)
     @api.response(500, 'Internal Server Error', error_model)
     @api.doc('astream_chat_with_agent')
-    async def post(self):
+    def post(self):
         """Asynchronously stream a message to the AI agent and get real-time updates
         
         This endpoint allows you to interact with the AI agent and receive streaming updates as:
@@ -192,21 +202,58 @@ class AsyncStreamChat(Resource):
             else:
                 stream_mode = stream_mode_param
             
-            # Define the async generator function for streaming
-            async def generate():
+            # Create a queue for async streaming
+            from queue import Queue
+            import threading
+            import asyncio
+            
+            queue = Queue()
+            
+            # Define the async workflow runner
+            def run_async_workflow():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
                 try:
-                    async for mode, chunk in workflow.astream(user_input, stream_mode=stream_mode):
-                        # Add the mode to the chunk
-                        chunk['stream_mode'] = mode
-                        # Yield the chunk as a JSON string with a data: prefix for SSE
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    async def async_stream():
+                        try:
+                            async for mode, chunk in workflow.astream(user_input, stream_mode=stream_mode):
+                                # Add the mode to the chunk
+                                chunk['stream_mode'] = mode
+                                queue.put(chunk)
+                        except Exception as e:
+                            error_chunk = {
+                                'type': 'error',
+                                'content': str(e),
+                                'stream_mode': 'error'
+                            }
+                            queue.put(error_chunk)
+                        finally:
+                            queue.put(None)  # Signal completion
+                    
+                    loop.run_until_complete(async_stream())
                 except Exception as e:
                     error_chunk = {
                         'type': 'error',
                         'content': str(e),
                         'stream_mode': 'error'
                     }
-                    yield f"data: {json.dumps(error_chunk)}\n\n"
+                    queue.put(error_chunk)
+                    queue.put(None)
+                finally:
+                    loop.close()
+            
+            # Start the async workflow in a separate thread
+            thread = threading.Thread(target=run_async_workflow)
+            thread.start()
+            
+            # Define the synchronous generator function for streaming
+            def generate():
+                while True:
+                    chunk = queue.get()
+                    if chunk is None:
+                        break
+                    yield f"data: {json.dumps(chunk)}\n\n"
             
             # Return a streaming response
             return Response(
@@ -302,11 +349,11 @@ class StreamTokenByToken(Resource):
                 asyncio.set_event_loop(loop)
                 
                 try:
-                    # Create the streaming handler
-                    stream_handler = get_streaming_handler()
-                    
                     # Create the workflow
                     wf = Workflow()
+                    
+                    # Create the streaming handler with agent reference
+                    stream_handler = get_streaming_handler(wf.agent)
                     
                     # Define the async function to run
                     async def run():
@@ -409,5 +456,5 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Port to run the server on')
     args = parser.parse_args()
     
-    # Run the app on the specified port
-    app.run(debug=True, port=args.port)
+    # Run the app on the specified port and bind to all interfaces
+    app.run(debug=True, host='0.0.0.0', port=args.port)

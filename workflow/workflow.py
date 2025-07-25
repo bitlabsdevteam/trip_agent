@@ -1,11 +1,19 @@
 from .agent import Agent
 from .output_parser import AgentResponse, FunctionCall
 import json
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnableLambda
 class Workflow:
-    def __init__(self):
-        self.agent = Agent()
+    def __init__(self, provider="groq", model_name=None, temperature=0.7, **kwargs):
+        """Initialize the Workflow with a configurable Agent.
+        
+        Args:
+            provider: The LLM provider (openai, groq, google)
+            model_name: The specific model name to use (defaults to provider's default)
+            temperature: The temperature for the LLM
+            **kwargs: Additional arguments to pass to the LLM constructor
+        """
+        self.agent = Agent(provider=provider, model_name=model_name, temperature=temperature, **kwargs)
         
         # Define a custom output formatter for structured response
         def format_agent_output(result):
@@ -64,8 +72,24 @@ class Workflow:
         
     def invoke(self, user_input: str):
         # Method to match the app.py implementation - preferred in Langchain and Langgraph
-        # Use the Runnable chain to process the input
-        formatted_result = self.agent_chain.invoke({"input": user_input})
+        
+        # Get the last message from chat history if available
+        last_message = None
+        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
+            messages = self.agent.memory.chat_memory.messages
+            # Find the last AI message
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    last_message = msg.content
+                    break
+        
+        # Include the last message in the input if available
+        enhanced_input = user_input
+        if last_message:
+            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        
+        # Use the Runnable chain to process the enhanced input
+        formatted_result = self.agent_chain.invoke({"input": enhanced_input})
         
         # Create function calls from the formatted result
         function_calls = []
@@ -121,9 +145,24 @@ class Workflow:
         Yields:
             tuple: (stream_mode, chunk) pairs where chunk is the streamed data
         """
-        # Stream from the agent executor
+        # Get the last message from chat history if available
+        last_message = None
+        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
+            messages = self.agent.memory.chat_memory.messages
+            # Find the last AI message
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    last_message = msg.content
+                    break
+        
+        # Include the last message in the input if available
+        enhanced_input = user_input
+        if last_message:
+            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        
+        # Stream from the agent executor with enhanced input
         for chunk in self.agent.agent_executor.stream(
-            {"input": user_input}
+            {"input": enhanced_input}
         ):
             # Determine the mode based on the chunk content
             if "intermediate_steps" in chunk:
@@ -145,9 +184,24 @@ class Workflow:
         Yields:
             tuple: (stream_mode, chunk) pairs where chunk is the streamed data
         """
-        # Stream from the agent executor
+        # Get the last message from chat history if available
+        last_message = None
+        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
+            messages = self.agent.memory.chat_memory.messages
+            # Find the last AI message
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    last_message = msg.content
+                    break
+        
+        # Include the last message in the input if available
+        enhanced_input = user_input
+        if last_message:
+            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        
+        # Stream from the agent executor with enhanced input
         async for chunk in self.agent.agent_executor.astream(
-            {"input": user_input}
+            {"input": enhanced_input}
         ):
             # Determine the mode based on the chunk content
             if "intermediate_steps" in chunk:
@@ -177,8 +231,28 @@ class Workflow:
         # Create a config with the provided callbacks
         config = RunnableConfig(callbacks=callbacks)
         
+        # Pass the agent reference to the StreamingHandler
+        for callback in callbacks or []:
+            if hasattr(callback, 'agent') and callback.agent is None:
+                callback.agent = self.agent
+        
+        # Get the last message from chat history if available
+        last_message = None
+        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
+            messages = self.agent.memory.chat_memory.messages
+            # Find the last AI message
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage):
+                    last_message = msg.content
+                    break
+        
+        # Include the last message in the input if available
+        enhanced_input = user_input
+        if last_message:
+            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        
         # Run the agent asynchronously and return the final result
-        return await self.agent.agent_executor.ainvoke({"input": user_input}, config=config)
+        return await self.agent.agent_executor.ainvoke({"input": enhanced_input}, config=config)
     
     def _format_chunk(self, mode, chunk):
         """Format a chunk based on its content.

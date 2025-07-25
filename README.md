@@ -1,10 +1,14 @@
 # Trip Agent
 
-A smart agent application built with Flask and LangChain that provides travel-related information using Groq's LLama3-70B model. The agent can retrieve weather information, time data, and city facts through specialized tools, offering a comprehensive travel assistant experience.
+A smart agent application built with Flask and LangChain that provides travel-related information using OpenAI's GPT-4o model. The agent can retrieve weather information, time data, and city facts through specialized tools, offering a comprehensive travel assistant experience.
 
 ## Features
 
-- Interactive chat interface with a LLama3-70B powered agent
+- Interactive chat interface with a GPT-4o powered agent (default)
+- Flexible LLM integration with support for multiple providers:
+  - OpenAI (GPT-4o, GPT-4, etc.)
+  - Groq (LLama3-70B, etc.)
+  - Google (Gemini Pro, etc.)
 - Specialized tools for retrieving:
   - Weather information for cities worldwide
   - Local time data for major cities
@@ -20,6 +24,7 @@ A smart agent application built with Flask and LangChain that provides travel-re
 - `workflow/`: Core agent implementation
   - `agent.py`: LangChain agent configuration
   - `workflow.py`: Main workflow implementation
+  - `llm_factory.py`: Factory for creating different LLM instances
   - `streaming_handler.py`: Handlers for streaming responses
   - `tools/`: Custom tools implementation
     - `weather_tool.py`: Tool for retrieving weather data
@@ -29,7 +34,7 @@ A smart agent application built with Flask and LangChain that provides travel-re
 ## Prerequisites
 
 - Python 3.8 or higher
-- Groq API key
+- OpenAI API key (for GPT-4o access)
 - WeatherAPI.com API key (for weather data)
 
 ## Setup
@@ -60,13 +65,21 @@ A smart agent application built with Flask and LangChain that provides travel-re
    Add the following variables to your `.env` file:
    ```
    # Required API Keys
-   GROQ_API_KEY=your_groq_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
    WEATHER_API_KEY=your_weather_api_key_here
    
    # Optional API Keys
    GOOGLE_API_KEY=your_google_api_key_here
-   OPENAI_API_KEY=your_openai_api_key_here
+   GROQ_API_KEY=your_groq_api_key_here
    HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+   
+   # LLM Configuration
+   # Provider can be "openai", "groq", or "google"
+   LLM_PROVIDER=openai
+   # Model name (defaults to provider's default if not specified)
+   LLM_MODEL=gpt-4o
+   # Temperature for the LLM (0.0 to 1.0)
+   LLM_TEMPERATURE=0.7
    ```
 
 5. Run the Flask app:
@@ -77,6 +90,34 @@ A smart agent application built with Flask and LangChain that provides travel-re
 6. Access the application:
    - API Documentation: http://localhost:5001/docs/
    - Test HTML Interface: http://localhost:5001/test_streaming.html
+
+## LLM Configuration
+
+The application supports multiple LLM providers through a factory design pattern. You can configure the LLM provider, model, and temperature in your `.env` file:
+
+```
+# LLM Configuration
+LLM_PROVIDER=openai  # Options: openai, groq, google
+LLM_MODEL=gpt-4o     # Model name (provider-specific)
+LLM_TEMPERATURE=0.7  # Temperature (0.0 to 1.0)
+```
+
+### Supported Providers and Models
+
+1. **OpenAI** (default)
+   - Default model: `gpt-4o`
+   - Other options: `gpt-4`, `gpt-3.5-turbo`, etc.
+   - Requires: `OPENAI_API_KEY`
+
+2. **Groq**
+   - Default model: `deepseek-r1-distill-llama-70b`
+   - Other options: `llama3-70b-8192`, `llama3-8b-8192`, `mixtral-8x7b-32768`, etc.
+   - Requires: `GROQ_API_KEY`
+
+3. **Google**
+   - Default model: `gemini-1.5-flash`
+   - Other options: `gemini-pro`, etc.
+   - Requires: `GOOGLE_API_KEY`
 
 ## Testing
 
@@ -98,13 +139,23 @@ You can use the provided test script to test the streaming API:
 python test_streaming.py
 ```
 
+### Testing Different LLM Providers
+
+You can test different LLM providers using the provided test script:
+
+```bash
+python test_llm_providers.py
+```
+
+This script will test the default OpenAI provider and any other providers for which you have configured API keys in your `.env` file.
+
 ## API Endpoints
 
 ### Health Check
 - `GET /api/v1/health` - Health check endpoint
 
 ### Chat Endpoints
-- `POST /api/v1/chat` - Chat with the LLama3-70B powered agent
+- `POST /api/v1/chat` - Chat with the GPT-4o powered agent
 - `POST /api/v1/chat/stream` - Stream real-time updates from the agent (synchronous)
 - `POST /api/v1/chat/astream` - Stream real-time updates from the agent (asynchronous)
 - `POST /api/v1/chat/stream_tokens` - Stream only the final response tokens (ChatGPT-like experience)
