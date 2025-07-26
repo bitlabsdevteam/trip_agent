@@ -22,12 +22,9 @@ Observation: the result of the action
 Thought: I now know the final answer
 Final Answer: the final answer to the original input question
 
-Your final answer should combine all the information you've gathered into a concise, helpful response.
+Your final answer should combine all the information you've gathered into a concise, helpful response. If you have previous conversation context, use it to provide more relevant and personalized responses.
 
-Begin!
-
-Question: {input}
-Thought: {agent_scratchpad}"""
+Begin!"""
 
     # Keeping the original prompts for backward compatibility
     @staticmethod

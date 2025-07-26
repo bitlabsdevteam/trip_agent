@@ -451,23 +451,21 @@ class Memory(Resource):
     @api.response(500, 'Internal Server Error', error_model)
     @api.doc('get_memory')
     def get(self):
-        """Get current conversation memory summary"""
+        """Get current conversation memory summary with BufferSummaryMemory details"""
         try:
-            # Get memory from the workflow's agent
-            memory_vars = workflow.agent.memory.load_memory_variables({})
-            summary = memory_vars.get('moving_summary_buffer', '')
-            history = memory_vars.get('history', '')
-            
-            # Count messages in history
-            message_count = 0
-            if history:
-                # Simple count based on newlines or message separators
-                message_count = len([line for line in history.split('\n') if line.strip()])
+            # Get comprehensive memory information from the agent
+            memory_info = workflow.agent.get_conversation_summary()
             
             return {
-                'summary': summary,
-                'message_count': message_count,
-                'has_history': bool(history)
+                'summary': memory_info.get('summary', ''),
+                'message_count': memory_info.get('stats', {}).get('total_messages', 0),
+                'has_history': bool(memory_info.get('history', '')),
+                'buffer_messages': memory_info.get('buffer_messages', []),
+                'stats': memory_info.get('stats', {}),
+                'buffer_size': memory_info.get('stats', {}).get('buffer_size', 8),
+                'current_buffer_count': memory_info.get('stats', {}).get('current_buffer_count', 0),
+                'summarizations_count': memory_info.get('stats', {}).get('summarizations_count', 0),
+                'has_summary': memory_info.get('stats', {}).get('has_summary', False)
             }
         except Exception as e:
             api.abort(500, f'Failed to retrieve memory: {str(e)}')
@@ -480,8 +478,8 @@ class ClearMemory(Resource):
     def post(self):
         """Clear conversation memory"""
         try:
-            # Clear the memory
-            workflow.agent.memory.clear()
+            # Clear the memory using the new system
+            workflow.agent.clear_memory()
             return {'success': True, 'message': 'Memory cleared successfully'}
         except Exception as e:
             api.abort(500, f'Failed to clear memory: {str(e)}')

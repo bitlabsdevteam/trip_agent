@@ -6,6 +6,20 @@ export interface ConversationMemory {
   summary: string;
   lastUpdated: number;
   messageCount: number;
+  bufferMessages: Array<{role: string; content: string}>;
+  stats: {
+    total_messages: number;
+    summarizations_count: number;
+    buffer_size: number;
+    summarization_threshold: number;
+    current_buffer_count: number;
+    has_summary: boolean;
+    last_summarization?: string;
+  };
+  bufferSize: number;
+  currentBufferCount: number;
+  summarizationsCount: number;
+  hasSummary: boolean;
 }
 
 export interface UseMemoryOptions {
@@ -59,15 +73,48 @@ export function useMemory(options: UseMemoryOptions = {}) {
   }, [memory, storageKey]);
 
   // Update memory with new summary
-  const updateMemory = useCallback(async (summary: string, messageCount: number) => {
+  const updateMemory = useCallback(async (summary: string, messageCount: number, additionalData?: Partial<ConversationMemory>) => {
     const newMemory: ConversationMemory = {
       summary,
       lastUpdated: Date.now(),
-      messageCount
+      messageCount,
+      bufferMessages: additionalData?.bufferMessages || [],
+      stats: additionalData?.stats || {
+        total_messages: messageCount,
+        summarizations_count: 0,
+        buffer_size: 0,
+        summarization_threshold: 0,
+        current_buffer_count: 0,
+        has_summary: !!summary
+      },
+      bufferSize: additionalData?.bufferSize || 0,
+      currentBufferCount: additionalData?.currentBufferCount || 0,
+      summarizationsCount: additionalData?.summarizationsCount || 0,
+      hasSummary: additionalData?.hasSummary || !!summary
     };
     
     setMemory(newMemory);
   }, []);
+
+interface MemoryData {
+  summary: string;
+  message_count: number;
+  has_history: boolean;
+  buffer_messages: Array<{role: string; content: string}>;
+  stats: {
+    total_messages: number;
+    summarizations_count: number;
+    buffer_size: number;
+    summarization_threshold: number;
+    current_buffer_count: number;
+    has_summary: boolean;
+    last_summarization?: string;
+  };
+  buffer_size: number;
+  current_buffer_count: number;
+  summarizations_count: number;
+  has_summary: boolean;
+}
 
   // Fetch memory summary from backend
   const fetchMemoryFromBackend = useCallback(async () => {
@@ -82,12 +129,31 @@ export function useMemory(options: UseMemoryOptions = {}) {
 
       const data = await response.json();
       
-      // Handle both successful and failed responses gracefully
-      if (data.success && data.summary) {
-        await updateMemory(data.summary, data.messageCount || 0);
-      } else if (!data.success) {
+      // Handle the direct response from backend API
+      if (data && typeof data === 'object') {
+        const memoryData = data as MemoryData;
+        const newMemory: ConversationMemory = {
+          summary: memoryData.summary || '',
+          lastUpdated: Date.now(),
+          messageCount: memoryData.message_count || 0,
+          bufferMessages: memoryData.buffer_messages || [],
+          stats: memoryData.stats || {
+            total_messages: 0,
+            summarizations_count: 0,
+            buffer_size: 0,
+            summarization_threshold: 0,
+            current_buffer_count: 0,
+            has_summary: false
+          },
+          bufferSize: memoryData.buffer_size || 0,
+          currentBufferCount: memoryData.current_buffer_count || 0,
+          summarizationsCount: memoryData.summarizations_count || 0,
+          hasSummary: memoryData.has_summary || false
+        };
+        setMemory(newMemory);
+      } else {
         // Log the error but don't throw - backend might be unavailable
-        console.warn('Backend memory fetch failed:', data.error || 'Unknown error');
+        console.warn('Failed to fetch memory from backend: Invalid response format');
       }
     } catch (error) {
       // Network or parsing errors - log but don't throw
@@ -131,7 +197,9 @@ export function useMemory(options: UseMemoryOptions = {}) {
     
     return {
       summary: memory.summary,
-      messageCount: memory.messageCount
+      messageCount: memory.messageCount,
+      bufferMessages: memory.bufferMessages,
+      stats: memory.stats
     };
   }, [memory]);
 

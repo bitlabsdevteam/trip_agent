@@ -114,31 +114,21 @@ class Workflow:
             
             # Get conversation history and summary from memory
             try:
-                memory_vars = self.agent.memory.load_memory_variables({})
+                memory_info = self.agent.get_conversation_summary()
                 conversation_history = []
                 
-                # Get the memory buffer summary and recent messages
-                if 'history' in memory_vars and memory_vars['history']:
-                    # ConversationSummaryBufferMemory provides history as a string
-                    history_content = memory_vars['history']
+                # Get the summary if available
+                if memory_info.get('summary'):
                     conversation_history.append({
                         "type": "summary",
-                        "content": history_content
-                    })
-                
-                # Also get the moving summary buffer if available
-                summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
-                if summary:
-                    conversation_history.append({
-                        "type": "moving_summary",
-                        "content": summary
+                        "content": memory_info['summary']
                     })
                 
                 # Get recent chat messages
-                chat_history = self.agent.memory.chat_memory.messages
-                for message in chat_history:
+                recent_messages = memory_info.get('recent_messages', [])
+                for message in recent_messages:
                     if hasattr(message, 'content'):
-                        message_type = "human" if hasattr(message, 'type') and message.type == "human" else "ai"
+                        message_type = "human" if isinstance(message, HumanMessage) else "ai"
                         conversation_history.append({
                             "type": message_type,
                             "content": message.content
@@ -187,7 +177,7 @@ class Workflow:
                         response = think_match.group(2).strip()
                     
                     # Save to memory
-                    self.agent.memory.save_context(
+                    self.agent.save_context_with_stats(
                         {"input": user_input},
                         {"output": response}
                     )
@@ -208,19 +198,19 @@ class Workflow:
                     
                     # Get conversation history and summary from memory for error case
                     try:
-                        memory_vars = self.agent.memory.load_memory_variables({})
+                        conversation_data = self.agent.get_conversation_summary()
                         conversation_history = []
                         
-                        # Get the memory buffer summary and recent messages
-                        if 'history' in memory_vars and memory_vars['history']:
-                            history_content = memory_vars['history']
+                        # Get the history and summary
+                        history_content = conversation_data.get('history', '')
+                        if history_content:
                             conversation_history.append({
                                 "type": "summary",
                                 "content": history_content
                             })
                         
-                        # Also get the moving summary buffer if available
-                        summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
+                        # Also get the summary if available
+                        summary = conversation_data.get('summary', '')
                         if summary:
                             conversation_history.append({
                                 "type": "moving_summary",
@@ -256,19 +246,11 @@ class Workflow:
         Yields:
             tuple: (stream_mode, chunk) pairs where chunk is the streamed data
         """
-        # Get conversation summary and history from memory using load_memory_variables
+        # Get conversation summary and history from memory using the new system
         try:
-            memory_vars = self.agent.memory.load_memory_variables({})
-            conversation_context = ""
-            
-            # Handle ConversationSummaryBufferMemory output (string format)
-            if 'history' in memory_vars and memory_vars['history']:
-                conversation_context = memory_vars['history']
-            
-            # Check for moving summary buffer
-            summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
-            
-            # Memory state is working correctly - debug prints removed
+            conversation_data = self.agent.get_conversation_summary()
+            conversation_context = conversation_data.get('history', '')
+            summary = conversation_data.get('summary', '')
             
             # Construct enhanced input with proper context
             if summary and conversation_context:
@@ -299,7 +281,7 @@ class Workflow:
             yield mode, formatted_chunk
         
         # Save the conversation to memory after streaming
-        self.agent.memory.save_context(
+        self.agent.save_context_with_stats(
             {"input": user_input},
             {"output": "[Streaming response completed]"}
         )
@@ -314,19 +296,11 @@ class Workflow:
         Yields:
             tuple: (stream_mode, chunk) pairs where chunk is the streamed data
         """
-        # Get conversation summary and history from memory using load_memory_variables
+        # Get conversation summary and history from memory using the new system
         try:
-            memory_vars = self.agent.memory.load_memory_variables({})
-            conversation_context = ""
-            
-            # Handle ConversationSummaryBufferMemory output (string format)
-            if 'history' in memory_vars and memory_vars['history']:
-                conversation_context = memory_vars['history']
-            
-            # Check for moving summary buffer
-            summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
-            
-            # Memory state is working correctly - debug prints removed
+            conversation_data = self.agent.get_conversation_summary()
+            conversation_context = conversation_data.get('history', '')
+            summary = conversation_data.get('summary', '')
             
             # Construct enhanced input with proper context
             if summary and conversation_context:
@@ -357,7 +331,7 @@ class Workflow:
             yield mode, formatted_chunk
         
         # Save the conversation to memory after streaming
-        self.agent.memory.save_context(
+        self.agent.save_context_with_stats(
             {"input": user_input},
             {"output": "[Streaming response completed]"}
         )
@@ -385,32 +359,21 @@ class Workflow:
             if hasattr(callback, 'agent') and callback.agent is None:
                 callback.agent = self.agent
         
-        # Get conversation summary and history from memory using load_memory_variables
+        # Get conversation summary and history from memory using the new system
         try:
-            memory_vars = self.agent.memory.load_memory_variables({})
-            conversation_context = ""
+            conversation_data = self.agent.get_conversation_summary()
+            conversation_context = conversation_data.get('history', '')
+            summary = conversation_data.get('summary', '')
             
-            # Handle ConversationSummaryBufferMemory output
-            if 'history' in memory_vars:
-                if isinstance(memory_vars['history'], str):
-                    # String format - includes summary and recent messages
-                    conversation_context = memory_vars['history']
-                elif isinstance(memory_vars['history'], list):
-                    # Message list format - convert to string
-                    for message in memory_vars['history']:
-                        if hasattr(message, 'content'):
-                            role = "Human" if hasattr(message, 'type') and message.type == "human" else "Assistant"
-                            conversation_context += f"{role}: {message.content}\n"
-            
-            # Check for moving summary buffer (ConversationSummaryBufferMemory specific)
-            if hasattr(self.agent.memory, 'moving_summary_buffer') and self.agent.memory.moving_summary_buffer:
-                summary = self.agent.memory.moving_summary_buffer
-                if conversation_context:
-                    enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nRecent Conversation:\n{conversation_context}\nCurrent Question: {user_input}"
-                else:
-                    enhanced_input = f"Previous Conversation Summary:\n{summary}\nCurrent Question: {user_input}"
+            # Construct enhanced input with proper context
+            if summary and conversation_context:
+                enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nRecent Conversation:\n{conversation_context}\n\nCurrent Question: {user_input}"
+            elif summary:
+                enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nCurrent Question: {user_input}"
+            elif conversation_context:
+                enhanced_input = f"Conversation History:\n{conversation_context}\n\nCurrent Question: {user_input}"
             else:
-                enhanced_input = f"Conversation History:\n{conversation_context}\nCurrent Question: {user_input}" if conversation_context else f"Current Question: {user_input}"
+                enhanced_input = f"Current Question: {user_input}"
                 
         except Exception as e:
             print(f"Error loading memory variables: {e}")
@@ -421,7 +384,7 @@ class Workflow:
         result = await self.agent.agent_executor.ainvoke({"input": enhanced_input}, config=config)
         
         # Save the conversation to memory after completion
-        self.agent.memory.save_context(
+        self.agent.save_context_with_stats(
             {"input": user_input},
             {"output": result.get("output", "[Response completed]")}
         )

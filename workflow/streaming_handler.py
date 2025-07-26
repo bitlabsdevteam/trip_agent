@@ -129,28 +129,21 @@ class StreamingHandler(BaseCallbackHandler):
         # Get conversation summary and history from memory for frontend
         conversation_summary = ""
         conversation_history = []
-        if hasattr(self, 'agent') and hasattr(self.agent, 'memory'):
+        if hasattr(self, 'agent') and hasattr(self.agent, 'get_conversation_summary'):
             try:
-                # Load memory variables to get summary and history
-                memory_vars = self.agent.memory.load_memory_variables({})
+                # Get conversation data using the new memory system
+                conversation_data = self.agent.get_conversation_summary()
+                conversation_summary = conversation_data.get('summary', '')
+                history_content = conversation_data.get('history', '')
                 
-                # Extract summary if available (ConversationSummaryBufferMemory provides this)
-                if 'history' in memory_vars:
-                    if isinstance(memory_vars['history'], str):
-                        conversation_summary = memory_vars['history']
-                    elif isinstance(memory_vars['history'], list):
-                        # Convert message list to readable format
-                        for msg in memory_vars['history']:
-                            if hasattr(msg, 'content'):
-                                msg_type = "human" if hasattr(msg, 'type') and msg.type == "human" else "ai"
-                                conversation_history.append({
-                                    "type": msg_type,
-                                    "content": msg.content
-                                })
-                
-                # Get the moving summary if it exists (for ConversationSummaryBufferMemory)
-                if hasattr(self.agent.memory, 'moving_summary_buffer') and self.agent.memory.moving_summary_buffer:
-                    conversation_summary = self.agent.memory.moving_summary_buffer
+                # If we have history content, format it for the frontend
+                if history_content:
+                    # For now, treat the history as a single summary entry
+                    # This maintains compatibility with the existing frontend
+                    conversation_history.append({
+                        "type": "summary",
+                        "content": history_content
+                    })
                     
             except Exception as e:
                 print(f"Error loading memory variables: {e}")
@@ -221,28 +214,21 @@ class StreamingHandler(BaseCallbackHandler):
             # Get conversation summary and history from memory for error case
             conversation_summary = ""
             conversation_history = []
-            if hasattr(self, 'agent') and hasattr(self.agent, 'memory'):
+            if hasattr(self, 'agent') and hasattr(self.agent, 'get_conversation_summary'):
                 try:
-                    # Load memory variables to get summary and history
-                    memory_vars = self.agent.memory.load_memory_variables({})
+                    # Get conversation data using the new memory system
+                    conversation_data = self.agent.get_conversation_summary()
+                    conversation_summary = conversation_data.get('summary', '')
+                    history_content = conversation_data.get('history', '')
                     
-                    # Extract summary if available (ConversationSummaryBufferMemory provides this)
-                    if 'history' in memory_vars:
-                        if isinstance(memory_vars['history'], str):
-                            conversation_summary = memory_vars['history']
-                        elif isinstance(memory_vars['history'], list):
-                            # Convert message list to readable format
-                            for msg in memory_vars['history']:
-                                if hasattr(msg, 'content'):
-                                    msg_type = "human" if hasattr(msg, 'type') and msg.type == "human" else "ai"
-                                    conversation_history.append({
-                                        "type": msg_type,
-                                        "content": msg.content
-                                    })
-                    
-                    # Get the moving summary if it exists (for ConversationSummaryBufferMemory)
-                    if hasattr(self.agent.memory, 'moving_summary_buffer') and self.agent.memory.moving_summary_buffer:
-                        conversation_summary = self.agent.memory.moving_summary_buffer
+                    # If we have history content, format it for the frontend
+                    if history_content:
+                        # For now, treat the history as a single summary entry
+                        # This maintains compatibility with the existing frontend
+                        conversation_history.append({
+                            "type": "summary",
+                            "content": history_content
+                        })
                         
                 except Exception as e:
                     print(f"Error loading memory variables in error handler: {e}")

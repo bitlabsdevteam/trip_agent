@@ -233,8 +233,23 @@ export function useChat(options: UseChatOptions = {}) {
                     if (parsedData.conversation_summary) {
                       console.log('Conversation summary received:', parsedData.conversation_summary);
                       try {
-                        // Update memory with the conversation summary from backend
-                        await updateMemory(parsedData.conversation_summary, messages.length + 1);
+                        // Update memory with the conversation summary and additional data
+                        const memoryData = {
+                          bufferMessages: [],
+                          stats: {
+                            total_messages: messages.length + 1,
+                            summarizations_count: 0,
+                            buffer_size: 8,
+                            summarization_threshold: 6,
+                            current_buffer_count: 0,
+                            has_summary: true
+                          },
+                          bufferSize: 8,
+                          currentBufferCount: 0,
+                          summarizationsCount: 0,
+                          hasSummary: true
+                        };
+                        await updateMemory(parsedData.conversation_summary, messages.length + 1, memoryData);
                       } catch (memoryError) {
                         console.warn('Failed to update memory with conversation summary:', memoryError);
                       }

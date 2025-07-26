@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ConversationMemory } from '../hooks/useMemory';
+import { MemoryStats } from './MemoryStats';
 
 interface MemoryDisplayProps {
   memory: ConversationMemory | null;
@@ -10,6 +11,19 @@ interface MemoryDisplayProps {
 
 export default function MemoryDisplay({ memory, onClearMemory }: MemoryDisplayProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Show memory stats if we have enhanced memory data
+  if (memory && memory.stats) {
+    return (
+      <div className="mb-4">
+        <MemoryStats 
+          stats={memory.stats}
+          bufferMessages={memory.bufferMessages || []}
+          summary={memory.summary}
+        />
+      </div>
+    );
+  }
 
   if (!memory || !memory.summary) {
     return (

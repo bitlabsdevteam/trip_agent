@@ -74,6 +74,7 @@ class LLMFactory:
             model=model,
             temperature=temperature,
             groq_api_key=api_key,
+            stop=["\nObservation:"],
             **kwargs
         )
     
@@ -93,5 +94,6 @@ class LLMFactory:
             model=model,
             temperature=temperature,
             google_api_key=api_key,
+            stop=["\nObservation:"],
             **kwargs
         )
