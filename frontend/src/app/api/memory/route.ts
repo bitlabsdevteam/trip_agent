@@ -4,8 +4,12 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5001';
 
 export async function GET(request: NextRequest) {
   try {
+    // Extract session_id from query parameters
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get('session_id') || 'default_session';
+    
     // Fetch memory summary from Flask backend
-    const response = await fetch(`${BACKEND_URL}/api/v1/memory`, {
+    const response = await fetch(`${BACKEND_URL}/api/v1/memory?session_id=${encodeURIComponent(sessionId)}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -52,7 +56,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action } = body;
+    const { action, session_id } = body;
 
     if (action === 'clear') {
       // Clear memory on backend
@@ -61,6 +65,7 @@ export async function POST(request: NextRequest) {
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ session_id: session_id || 'default_session' }),
         // Add timeout to prevent hanging
         signal: AbortSignal.timeout(10000) // 10 second timeout
       });

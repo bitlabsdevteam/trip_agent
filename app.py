@@ -14,6 +14,10 @@ load_dotenv()
 # Import workflow after loading environment variables
 from workflow import Workflow
 from workflow.streaming_handler import get_streaming_handler
+from workflow.logger import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 app = Flask(__name__)
 # Enable CORS for all routes and origins with additional configuration
@@ -33,24 +37,33 @@ llm_provider = os.getenv("LLM_PROVIDER", "openai")  # Default to OpenAI
 llm_model = os.getenv("LLM_MODEL", "gpt-4o")  # Default to GPT-4o
 llm_temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))  # Default temperature
 
+logger.info(f"Initializing Flask app with LLM provider: {llm_provider}, model: {llm_model}, temperature: {llm_temperature}")
+
 # Initialize the workflow with the configured LLM
-workflow = Workflow(
-    provider=llm_provider,
-    model_name=llm_model,
-    temperature=llm_temperature
-)
+try:
+    workflow = Workflow(
+        provider=llm_provider,
+        model_name=llm_model,
+        temperature=llm_temperature
+    )
+    logger.info("Workflow initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize workflow: {e}", exc_info=True)
+    raise
 
 # Define namespaces
 chat_ns = api.namespace('chat', description='Chat operations')
 
 # Define models for request/response documentation
 chat_request_model = api.model('ChatRequest', {
-    'message': fields.String(required=True, description='User message to send to the agent', example='What is the weather in New York?')
+    'message': fields.String(required=True, description='User message to send to the agent', example='What is the weather in New York?'),
+    'session_id': fields.String(required=False, description='Session ID for conversation continuity', example='session_123')
 })
 
 # Define models for streaming request
 stream_request_model = api.model('StreamRequest', {
     'message': fields.String(required=True, description='User message to send to the agent', example='What is the weather in New York?'),
+    'session_id': fields.String(required=False, description='Session ID for conversation continuity', example='session_123'),
     'stream_mode': fields.String(description='Streaming mode to use', enum=['updates', 'messages', 'both'], default='both')
 })
 
@@ -89,13 +102,22 @@ class Chat(Resource):
         """
         try:
             if not request.json or 'message' not in request.json:
+                logger.warning("Chat request missing required field: message")
                 api.abort(400, 'Missing required field: message')
             
             user_input = request.json.get('message')
             if not user_input or not user_input.strip():
+                logger.warning("Chat request with empty message")
                 api.abort(400, 'Message cannot be empty')
             
-            result = workflow.invoke(user_input)
+            session_id = request.json.get('session_id', 'default_session')
+            
+            logger.info(f"Processing chat request for session {session_id}: {user_input[:100]}...")
+            
+            result = workflow.invoke(user_input, session_id=session_id)
+            
+            logger.info(f"Chat request completed successfully for session {session_id}")
+            
             return {
                 "response": result.final_response,
                 "reasoning": result.tool_outputs,
@@ -103,6 +125,7 @@ class Chat(Resource):
                 "agent_response": result.agent_response
             }
         except Exception as e:
+            logger.error(f"Internal server error in chat endpoint: {str(e)}", exc_info=True)
             api.abort(500, f'Internal server error: {str(e)}')
 
 @chat_ns.route('/stream')
@@ -124,14 +147,20 @@ class StreamChat(Resource):
         """
         try:
             if not request.json or 'message' not in request.json:
+                logger.warning("Stream chat request missing required field: message")
                 api.abort(400, 'Missing required field: message')
             
             user_input = request.json.get('message')
             if not user_input or not user_input.strip():
+                logger.warning("Stream chat request with empty message")
                 api.abort(400, 'Message cannot be empty')
+            
+            session_id = request.json.get('session_id', 'default_session')
             
             # Get the stream mode from the request
             stream_mode_param = request.json.get('stream_mode', 'both')
+            
+            logger.info(f"Processing stream chat request for session {session_id} with mode {stream_mode_param}: {user_input[:100]}...")
             
             # Convert the stream mode to the format expected by the workflow
             if stream_mode_param == 'both':
@@ -142,12 +171,14 @@ class StreamChat(Resource):
             # Define the generator function for streaming
             def generate():
                 try:
-                    for mode, chunk in workflow.stream(user_input, stream_mode=stream_mode):
+                    for mode, chunk in workflow.stream(user_input, stream_mode=stream_mode, session_id=session_id):
                         # Add the mode to the chunk
                         chunk['stream_mode'] = mode
                         # Yield the chunk as a JSON string with a data: prefix for SSE
                         yield f"data: {json.dumps(chunk)}\n\n"
+                    logger.info(f"Stream chat completed successfully for session {session_id}")
                 except Exception as e:
+                    logger.error(f"Error in stream generator for session {session_id}: {str(e)}", exc_info=True)
                     error_chunk = {
                         'type': 'error',
                         'content': str(e),
@@ -166,6 +197,7 @@ class StreamChat(Resource):
                 }
             )
         except Exception as e:
+            logger.error(f"Internal server error in stream chat endpoint: {str(e)}", exc_info=True)
             api.abort(500, f'Internal server error: {str(e)}')
 
 # Add the async streaming endpoint
@@ -189,14 +221,20 @@ class AsyncStreamChat(Resource):
         """
         try:
             if not request.json or 'message' not in request.json:
+                logger.warning("Async stream chat request missing required field: message")
                 api.abort(400, 'Missing required field: message')
             
             user_input = request.json.get('message')
             if not user_input or not user_input.strip():
+                logger.warning("Async stream chat request with empty message")
                 api.abort(400, 'Message cannot be empty')
+            
+            session_id = request.json.get('session_id', 'default_session')
             
             # Get the stream mode from the request
             stream_mode_param = request.json.get('stream_mode', 'both')
+            
+            logger.info(f"Processing async stream chat request for session {session_id} with mode {stream_mode_param}: {user_input[:100]}...")
             
             # Convert the stream mode to the format expected by the workflow
             if stream_mode_param == 'both':
@@ -219,11 +257,12 @@ class AsyncStreamChat(Resource):
                 try:
                     async def async_stream():
                         try:
-                            async for mode, chunk in workflow.astream(user_input, stream_mode=stream_mode):
+                            async for mode, chunk in workflow.astream(user_input, stream_mode=stream_mode, session_id=session_id):
                                 # Add the mode to the chunk
                                 chunk['stream_mode'] = mode
                                 queue.put(chunk)
                         except Exception as e:
+                            logger.error(f"Error in async stream for session {session_id}: {str(e)}", exc_info=True)
                             error_chunk = {
                                 'type': 'error',
                                 'content': str(e),
@@ -268,6 +307,7 @@ class AsyncStreamChat(Resource):
                 }
             )
         except Exception as e:
+            logger.error(f"Internal server error in async stream chat endpoint: {str(e)}", exc_info=True)
             api.abort(500, f'Internal server error: {str(e)}')
 
 # Add the token-only streaming endpoint
@@ -292,10 +332,12 @@ class StreamTokens(Resource):
             if not user_input or not user_input.strip():
                 api.abort(400, 'Message cannot be empty')
             
+            session_id = request.json.get('session_id', 'default_session')
+            
             # Define the generator function for streaming tokens only
             def generate():
                 try:
-                    for mode, chunk in workflow.stream(user_input, stream_mode="messages"):
+                    for mode, chunk in workflow.stream(user_input, stream_mode="messages", session_id=session_id):
                         if chunk.get('type') == 'token':
                             yield f"data: {json.dumps({'text': chunk.get('content', '')})}\n\n"
                 except Exception as e:
@@ -341,6 +383,8 @@ class StreamTokenByToken(Resource):
             if not user_input or not user_input.strip():
                 api.abort(400, 'Message cannot be empty')
             
+            session_id = request.json.get('session_id', 'default_session')
+            
             # Create a queue for the streaming handler
             queue = Queue()
             
@@ -363,7 +407,7 @@ class StreamTokenByToken(Resource):
                         stream_task = asyncio.create_task(process_stream(stream_handler))
                         
                         # Run the agent with the streaming handler
-                        final_result = await wf.astream_tokens(user_input, callbacks=[stream_handler])
+                        final_result = await wf.astream_tokens(user_input, callbacks=[stream_handler], session_id=session_id)
                         
                         # Signal that we're done and add the final answer
                         queue.put({"type": "final", "content": final_result.get("output", "")})
@@ -453,8 +497,15 @@ class Memory(Resource):
     def get(self):
         """Get current conversation memory summary with BufferSummaryMemory details"""
         try:
+            # Get session_id from query parameters
+            session_id = request.args.get('session_id', 'default_session')
+            
+            logger.info(f"Retrieving memory for session {session_id}")
+            
             # Get comprehensive memory information from the agent
-            memory_info = workflow.agent.get_conversation_summary()
+            memory_info = workflow.agent.get_conversation_summary(session_id=session_id)
+            
+            logger.debug(f"Memory retrieved for session {session_id}: {memory_info.get('stats', {})}")
             
             return {
                 'summary': memory_info.get('summary', ''),
@@ -468,20 +519,35 @@ class Memory(Resource):
                 'has_summary': memory_info.get('stats', {}).get('has_summary', False)
             }
         except Exception as e:
+            logger.error(f"Failed to retrieve memory for session {session_id}: {str(e)}", exc_info=True)
             api.abort(500, f'Failed to retrieve memory: {str(e)}')
 
 @memory_ns.route('/clear')
 class ClearMemory(Resource):
+    @api.expect(api.model('ClearMemoryRequest', {
+        'session_id': fields.String(required=False, description='Session ID to clear memory for', example='session_123')
+    }))
     @api.response(200, 'Memory cleared successfully')
     @api.response(500, 'Internal Server Error', error_model)
     @api.doc('clear_memory')
     def post(self):
         """Clear conversation memory"""
         try:
+            # Get session_id from request body or use default
+            session_id = 'default_session'
+            if request.json:
+                session_id = request.json.get('session_id', 'default_session')
+            
+            logger.info(f"Clearing memory for session {session_id}")
+            
             # Clear the memory using the new system
-            workflow.agent.clear_memory()
+            workflow.agent.clear_memory(session_id=session_id)
+            
+            logger.info(f"Memory cleared successfully for session {session_id}")
+            
             return {'success': True, 'message': 'Memory cleared successfully'}
         except Exception as e:
+            logger.error(f"Failed to clear memory for session {session_id}: {str(e)}", exc_info=True)
             api.abort(500, f'Failed to clear memory: {str(e)}')
 
 # Add a health check endpoint
@@ -501,6 +567,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Run the Flask API server')
     parser.add_argument('--port', type=int, default=5000, help='Port to run the server on')
     args = parser.parse_args()
+    
+    logger.info(f"Starting Flask API server on host 0.0.0.0 port {args.port}")
     
     # Run the app on the specified port and bind to all interfaces
     app.run(debug=True, host='0.0.0.0', port=args.port)

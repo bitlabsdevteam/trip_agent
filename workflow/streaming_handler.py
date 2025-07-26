@@ -4,6 +4,10 @@ import asyncio
 import json
 import re
 from langchain_core.messages import HumanMessage, AIMessage
+from .logger import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 class StreamingHandler(BaseCallbackHandler):
     """Callback handler for streaming tokens and agent steps.
@@ -72,6 +76,7 @@ class StreamingHandler(BaseCallbackHandler):
         """Run when a tool starts being used."""
         self.current_section = "tool"
         tool_name = serialized.get("name", "unknown_tool")
+        logger.debug(f"Tool started: {tool_name} with input: {str(input_str)[:100]}...")
         
         # Extract parameters from input_str
         params = {}
@@ -103,6 +108,7 @@ class StreamingHandler(BaseCallbackHandler):
     async def on_tool_end(self, output: str, **kwargs):
         """Run when a tool finishes being used."""
         self.current_section = "thinking"
+        logger.debug(f"Tool completed with output: {str(output)[:100]}...")
         await self.queue.put({"type": "tool_separator", "content": "\n---Tool Complete---\n"})
     
     async def on_chain_start(self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs):
@@ -146,7 +152,7 @@ class StreamingHandler(BaseCallbackHandler):
                     })
                     
             except Exception as e:
-                print(f"Error loading memory variables: {e}")
+                logger.error(f"Error loading memory variables in streaming handler: {e}", exc_info=True)
         
         # When the chain ends, we can send the structured format with memory info
         structured_output = {
@@ -165,6 +171,7 @@ class StreamingHandler(BaseCallbackHandler):
     async def on_chain_error(self, error: Union[Exception, KeyboardInterrupt], **kwargs):
         """Run when chain errors with enhanced parsing."""
         error_str = str(error)
+        logger.error(f"Chain error in streaming handler: {error_str}", exc_info=True)
         await self.queue.put({"type": "error", "content": self._escape_special_chars(error_str)})
         
         # Enhanced error patterns matching frontend implementation

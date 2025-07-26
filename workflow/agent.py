@@ -7,9 +7,14 @@ from langchain_core.messages import HumanMessage, AIMessage
 import os
 import warnings
 import datetime
+import time
+from .logger import get_logger
 
 # Suppress deprecation warnings for cleaner output
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Initialize logger for this module
+logger = get_logger(__name__)
 
 # Import the tools from the tools package
 from .tools import tools, WeatherTool, TimeTool, CityFactsTool
@@ -28,13 +33,20 @@ class Agent:
             summarization_threshold: Trigger summarization when buffer exceeds this (default: 6)
             **kwargs: Additional arguments to pass to the LLM constructor
         """
-        # Initialize the LLM using the factory
-        self.llm = LLMFactory.create_llm(
-            provider=provider,
-            model_name=model_name,
-            temperature=temperature,
-            **kwargs
-        )
+        logger.info(f"Initializing Agent with provider={provider}, model={model_name}, temperature={temperature}")
+        
+        try:
+            # Initialize the LLM using the factory
+            self.llm = LLMFactory.create_llm(
+                provider=provider,
+                model_name=model_name,
+                temperature=temperature,
+                **kwargs
+            )
+            logger.debug(f"LLM initialized successfully with provider: {provider}")
+        except Exception as e:
+            logger.error(f"Failed to initialize LLM: {e}", exc_info=True)
+            raise
         
         # Memory configuration
         self.buffer_size = buffer_size
@@ -136,8 +148,12 @@ class Agent:
         if session_id is None:
             session_id = self.current_session_id
         
+        logger.info(f"Processing input for session {session_id}: {user_input[:100]}...")
+        start_time = time.time()
+        
         try:
             # Use RunnableWithMessageHistory to process input with conversation context
+            logger.debug(f"Invoking agent with history for session: {session_id}")
             result = self.agent_with_history.invoke(
                 {"input": user_input},
                 config={"configurable": {"session_id": session_id}}
@@ -149,6 +165,9 @@ class Agent:
                 {"output": result.get("output", "")},
                 session_id=session_id
             )
+            
+            execution_time = time.time() - start_time
+            logger.info(f"Successfully processed input in {execution_time:.3f}s for session {session_id}")
             
 
             
@@ -271,9 +290,10 @@ class Agent:
                 
                 # Save to memory
                 try:
-                    self.save_context_with_stats({"input": user_input}, {"output": response})
+                    self.save_context_with_stats({"input": user_input}, {"output": response}, session_id=session_id)
+                    logger.debug(f"Successfully saved context to memory for session {session_id}")
                 except Exception as save_error:
-                    print(f"Error saving to memory: {save_error}")
+                    logger.error(f"Error saving to memory for session {session_id}: {save_error}", exc_info=True)
                 
                 return {
                     "response": response,
@@ -341,7 +361,7 @@ class Agent:
                 'stats': current_stats
             }
         except Exception as e:
-            print(f"Error getting conversation summary: {e}")
+            logger.error(f"Error getting conversation summary for session {session_id}: {e}", exc_info=True)
             return {
                 'summary': '',
                 'recent_messages': [],
@@ -377,7 +397,7 @@ class Agent:
             else:
                 return "No summary needed yet - conversation is still short."
         except Exception as e:
-             print(f"Error updating summary: {e}")
+             logger.error(f"Error updating summary for session {session_id}: {e}", exc_info=True)
              return ''
     
     def clear_memory(self, session_id: str = None):

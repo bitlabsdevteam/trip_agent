@@ -4,6 +4,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     
+    // Add session_id to the request body if not present
+    const requestBody = {
+      message: body.message,
+      session_id: body.session_id || 'default_session'
+    };
+    
     // Forward the request to the Flask backend
     // Using stream_token_by_token endpoint for token-by-token streaming
     // Use environment variable for API URL or fallback to localhost for development
@@ -14,7 +20,7 @@ export async function POST(request: NextRequest) {
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
     });
 
     // Check if the response is ok

@@ -1,8 +1,13 @@
 from .agent import Agent
 from .output_parser import AgentResponse, FunctionCall
 import json
+import time
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.runnables import RunnableLambda
+from .logger import get_logger
+
+# Initialize logger for this module
+logger = get_logger(__name__)
 class Workflow:
     def __init__(self, provider="openai", model_name=None, temperature=0.7, **kwargs):
         """Initialize the Workflow with a configurable Agent.
@@ -13,7 +18,13 @@ class Workflow:
             temperature: The temperature for the LLM
             **kwargs: Additional arguments to pass to the LLM constructor
         """
-        self.agent = Agent(provider=provider, model_name=model_name, temperature=temperature, **kwargs)
+        logger.info(f"Initializing Workflow with provider={provider}, model={model_name}")
+        try:
+            self.agent = Agent(provider=provider, model_name=model_name, temperature=temperature, **kwargs)
+            logger.debug("Workflow agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Workflow agent: {e}", exc_info=True)
+            raise
         
         # Define a custom output formatter for structured response
         def format_agent_output(result):
@@ -70,12 +81,16 @@ class Workflow:
             "conversation_history": []
         }
         
-    def invoke(self, user_input: str):
+    def invoke(self, user_input: str, session_id: str = "default_session"):
         # Method to match the app.py implementation - preferred in Langchain and Langgraph
+        
+        logger.info(f"Invoking workflow for session {session_id}: {user_input[:100]}...")
+        start_time = time.time()
         
         try:
             # Use the agent's process_input method which handles memory
-            result = self.agent.process_input(user_input)
+            result = self.agent.process_input(user_input, session_id=session_id)
+            logger.debug(f"Agent processing completed for session {session_id}")
             
             # Parse and separate reasoning from final output if using <think> tags
             response = result["response"]
@@ -114,7 +129,7 @@ class Workflow:
             
             # Get conversation history and summary from memory
             try:
-                memory_info = self.agent.get_conversation_summary()
+                memory_info = self.agent.get_conversation_summary(session_id=session_id)
                 conversation_history = []
                 
                 # Get the summary if available
@@ -135,9 +150,12 @@ class Workflow:
                         })
                         
             except Exception as e:
-                print(f"Error loading conversation history: {e}")
+                logger.error(f"Error loading conversation history for session {session_id}: {e}", exc_info=True)
                 conversation_history = []
 
+            execution_time = time.time() - start_time
+            logger.info(f"Successfully completed workflow invoke in {execution_time:.3f}s for session {session_id}")
+            
             return ResultObject(
                 final_response=response,
                 tool_outputs={"reasoning": thinking, "steps": result.get("tool_calls", [])},
@@ -148,9 +166,11 @@ class Workflow:
         except Exception as e:
             # Enhanced error handling for parsing failures
             error_str = str(e)
+            logger.warning(f"Error in workflow invoke for session {session_id}: {error_str}")
             
             # Try to extract content from OUTPUT_PARSING_FAILURE errors
             if "Could not parse LLM output" in error_str or "OUTPUT_PARSING_FAILURE" in error_str:
+                logger.debug(f"Attempting to extract content from parsing failure for session {session_id}")
                 import re
                 patterns = [
                     r'Could not parse LLM output: `([\s\S]+?)`',
@@ -179,7 +199,8 @@ class Workflow:
                     # Save to memory
                     self.agent.save_context_with_stats(
                         {"input": user_input},
-                        {"output": response}
+                        {"output": response},
+                        session_id=session_id
                     )
                     
                     # Create structured response
@@ -198,7 +219,7 @@ class Workflow:
                     
                     # Get conversation history and summary from memory for error case
                     try:
-                        conversation_data = self.agent.get_conversation_summary()
+                        conversation_data = self.agent.get_conversation_summary(session_id=session_id)
                         conversation_history = []
                         
                         # Get the history and summary
@@ -218,7 +239,7 @@ class Workflow:
                             })
                             
                     except Exception as mem_error:
-                        print(f"Error loading conversation history in error handler: {mem_error}")
+                        logger.error(f"Error loading conversation history in error handler for session {session_id}: {mem_error}", exc_info=True)
                         conversation_history = []
                     
                     return ResultObject(
@@ -236,7 +257,7 @@ class Workflow:
         # Use invoke() instead as it's the preferred method in Langchain and Langgraph
         return self.invoke(user_input)
         
-    def stream(self, user_input: str, stream_mode=None):
+    def stream(self, user_input: str, stream_mode=None, session_id: str = "default_session"):
         """Stream the workflow execution results.
         
         Args:
@@ -248,7 +269,7 @@ class Workflow:
         """
         # Get conversation summary and history from memory using the new system
         try:
-            conversation_data = self.agent.get_conversation_summary()
+            conversation_data = self.agent.get_conversation_summary(session_id=session_id)
             conversation_context = conversation_data.get('history', '')
             summary = conversation_data.get('summary', '')
             
@@ -263,7 +284,7 @@ class Workflow:
                 enhanced_input = f"Current Question: {user_input}"
                 
         except Exception as e:
-            print(f"Error loading memory variables: {e}")
+            logger.error(f"Error loading memory variables for stream in session {session_id}: {e}", exc_info=True)
             enhanced_input = f"Current Question: {user_input}"
         
         # Stream from the agent executor with enhanced input
@@ -283,10 +304,11 @@ class Workflow:
         # Save the conversation to memory after streaming
         self.agent.save_context_with_stats(
             {"input": user_input},
-            {"output": "[Streaming response completed]"}
+            {"output": "[Streaming response completed]"},
+            session_id=session_id
         )
     
-    async def astream(self, user_input: str, stream_mode=None):
+    async def astream(self, user_input: str, stream_mode=None, session_id: str = "default_session"):
         """Asynchronously stream the workflow execution results.
         
         Args:
@@ -298,7 +320,7 @@ class Workflow:
         """
         # Get conversation summary and history from memory using the new system
         try:
-            conversation_data = self.agent.get_conversation_summary()
+            conversation_data = self.agent.get_conversation_summary(session_id=session_id)
             conversation_context = conversation_data.get('history', '')
             summary = conversation_data.get('summary', '')
             
@@ -313,7 +335,7 @@ class Workflow:
                 enhanced_input = f"Current Question: {user_input}"
                 
         except Exception as e:
-            print(f"Error loading memory variables: {e}")
+            logger.error(f"Error loading memory variables for astream in session {session_id}: {e}", exc_info=True)
             enhanced_input = f"Current Question: {user_input}"
         
         # Stream from the agent executor with enhanced input
@@ -333,10 +355,11 @@ class Workflow:
         # Save the conversation to memory after streaming
         self.agent.save_context_with_stats(
             {"input": user_input},
-            {"output": "[Streaming response completed]"}
+            {"output": "[Streaming response completed]"},
+            session_id=session_id
         )
             
-    async def astream_tokens(self, user_input: str, callbacks=None):
+    async def astream_tokens(self, user_input: str, callbacks=None, session_id: str = "default_session"):
         """Asynchronously stream tokens using agent.ainvoke with callbacks.
         
         This method is designed to work with the StreamingHandler callback
@@ -361,7 +384,7 @@ class Workflow:
         
         # Get conversation summary and history from memory using the new system
         try:
-            conversation_data = self.agent.get_conversation_summary()
+            conversation_data = self.agent.get_conversation_summary(session_id=session_id)
             conversation_context = conversation_data.get('history', '')
             summary = conversation_data.get('summary', '')
             
@@ -386,7 +409,8 @@ class Workflow:
         # Save the conversation to memory after completion
         self.agent.save_context_with_stats(
             {"input": user_input},
-            {"output": result.get("output", "[Response completed]")}
+            {"output": result.get("output", "[Response completed]")},
+            session_id=session_id
         )
         
         return result
