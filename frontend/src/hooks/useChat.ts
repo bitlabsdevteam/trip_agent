@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useMemory } from './useMemory';
 
 export type MessageRole = 'user' | 'assistant' | 'thinking' | 'system';
 
@@ -12,13 +13,7 @@ export interface Message {
   id?: string; // Optional ID for message identification
 }
 
-export interface ConversationSummary {
-  summary: string;
-  recent_messages: {
-    type: string;
-    content: string;
-  }[];
-}
+
 
 export interface UseChatOptions {
   onError?: (error: Error) => void;
@@ -30,6 +25,15 @@ export function useChat(options: UseChatOptions = {}) {
   const [messages, setMessages] = useState<Message[]>(
     options.initialMessages || []
   );
+  
+  // Initialize memory hook
+  const {
+    memory,
+    updateMemory,
+    fetchMemoryFromBackend,
+    clearMemory,
+    shouldUpdateMemory
+  } = useMemory();
   
   // Load messages from localStorage on client-side only
   useEffect(() => {
@@ -45,11 +49,15 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, []);
   
+  // Fetch memory from backend on mount
+  useEffect(() => {
+    fetchMemoryFromBackend();
+  }, [fetchMemoryFromBackend]);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [currentAssistantMessage, setCurrentAssistantMessage] = useState('');
   const [thinkingMessages, setThinkingMessages] = useState<Message[]>([]);
-  const [conversationSummary, setConversationSummary] = useState<ConversationSummary | null>(null);
-  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Save messages to localStorage whenever they change
@@ -220,6 +228,17 @@ export function useChat(options: UseChatOptions = {}) {
                       };
                       setThinkingMessages(prev => [...prev, functionCallMessage]);
                     }
+                    
+                    // Capture conversation_summary if available and update memory
+                    if (parsedData.conversation_summary) {
+                      console.log('Conversation summary received:', parsedData.conversation_summary);
+                      try {
+                        // Update memory with the conversation summary from backend
+                        await updateMemory(parsedData.conversation_summary, messages.length + 1);
+                      } catch (memoryError) {
+                        console.warn('Failed to update memory with conversation summary:', memoryError);
+                      }
+                    }
                   } catch (parseError) {
                     console.error('Error parsing structured output:', parseError, data.data);
                   }
@@ -233,20 +252,82 @@ export function useChat(options: UseChatOptions = {}) {
                   console.error('Stream error:', data.data);
                   // Extract any useful information from the error message
                   const errorMsg = data.data || '';
-                  const match = errorMsg.match(/Could not parse LLM output: `(.+)`/);
+                  
+                  // Improved regex pattern to handle different error formats with multiline content
+                  // This handles both direct LLM output errors and Stream errors
+                  const patterns = [
+                    /Could not parse LLM output: `([\s\S]+?)`/,  // Standard format
+                    /Stream error: "Could not parse LLM output: `([\s\S]+?)`/,  // Stream error format
+                    /OUTPUT_PARSING_FAILURE[\s\S]*?`([\s\S]+?)`/  // OUTPUT_PARSING_FAILURE format
+                  ];
+                  
+                  let match = null;
+                  for (const pattern of patterns) {
+                    match = errorMsg.match(pattern);
+                    if (match && match[1]) break;
+                  }
+                  
                   if (match && match[1]) {
                     // Extract the actual content from the error message
-                    assistantResponse = match[1];
+                    // Clean up any escaped characters
+                    let extractedContent = match[1];
+                    let hasExtractedThinking = false;
+                    
+                    try {
+                      // Try to handle escaped characters if they exist
+                      if (extractedContent.includes('\\n')) {
+                        extractedContent = JSON.parse('"' + extractedContent.replace(/"/g, '\\"') + '"');
+                      }
+                      
+                      // Handle <think> tag format - extract thinking and response parts
+                      const thinkMatch = extractedContent.match(/<think>([\s\S]+?)<\/think>([\s\S]+)/);
+                      if (thinkMatch && thinkMatch.length >= 3) {
+                        const thinkingContent = thinkMatch[1].trim();
+                        const responseContent = thinkMatch[2].trim();
+                        
+                        // Add thinking content to thinking messages
+                        if (thinkingContent) {
+                          const thinkingMessage: Message = {
+                            content: thinkingContent,
+                            role: 'thinking',
+                            timestamp: Date.now(),
+                            isThinking: true
+                          };
+                          setThinkingMessages(prev => [...prev, thinkingMessage]);
+                          hasExtractedThinking = true;
+                        }
+                        
+                        // Use only the response part for the assistant's message
+                        extractedContent = responseContent;
+                      }
+                    } catch (e) {
+                      console.warn('Failed to parse escaped characters or thinking content in extracted content', e);
+                      // Continue with the original extracted content
+                    }
+                    
+                    assistantResponse = extractedContent;
                     setCurrentAssistantMessage(assistantResponse);
                     
                     // Add the error message to the chat as a system message
-                    const systemMessage: Message = {
-                      content: 'There was an error processing the response, but I was able to extract the content.',
-                      role: 'system',
-                      timestamp: Date.now(),
-                      id: crypto.randomUUID()
-                    };
-                    setMessages(prevMessages => [...prevMessages, systemMessage]);
+                    // Only add if we successfully extracted content
+                    if (extractedContent && extractedContent.trim()) {
+                      // Check if we extracted thinking content
+                      const hasThinking = hasExtractedThinking || (
+                        thinkingMessages.length > 0 && 
+                        thinkingMessages[thinkingMessages.length - 1]?.timestamp !== undefined &&
+                        thinkingMessages[thinkingMessages.length - 1].timestamp! > Date.now() - 5000
+                      );
+                      
+                      const systemMessage: Message = {
+                        content: hasThinking 
+                          ? 'There was an error in the response format, but I extracted both the thinking process and the response content.'
+                          : 'There was an error in the response format, but I was able to extract the content.',
+                        role: 'system',
+                        timestamp: Date.now(),
+                        id: crypto.randomUUID()
+                      };
+                      setMessages(prevMessages => [...prevMessages, systemMessage]);
+                    }
                   } else {
                     // Add a generic error message if we couldn't extract content
                     const systemMessage: Message = {
@@ -285,11 +366,24 @@ export function useChat(options: UseChatOptions = {}) {
 
       // Add the complete assistant message to the chat with timestamp
       if (assistantResponse) {
-        setMessages((prev) => [...prev, { 
+        const newMessages: Message[] = [...messages, userMessage, { 
           content: assistantResponse, 
-          role: 'assistant',
+          role: 'assistant' as MessageRole,
           timestamp: Date.now() 
-        }]);
+        }];
+        setMessages(newMessages);
+        
+        // Check if we should update memory after this conversation
+        if (shouldUpdateMemory(newMessages.length)) {
+          // Fetch updated memory from backend after a short delay
+          setTimeout(() => {
+            try {
+              fetchMemoryFromBackend();
+            } catch (memoryError) {
+              console.warn('Failed to fetch memory from backend:', memoryError);
+            }
+          }, 1000);
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.name !== 'AbortError') {
@@ -315,16 +409,23 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, []);
 
-  const clearMessages = useCallback(() => {
+  const clearMessages = useCallback(async () => {
     setMessages([]);
     setCurrentAssistantMessage('');
     setThinkingMessages([]);
-    setConversationSummary(null);
+
     // Also clear localStorage
     if (typeof window !== 'undefined') {
       localStorage.removeItem('chatMessages');
     }
-  }, []);
+    
+    // Clear memory both locally and on backend using the updated clearMemory function
+    try {
+      await clearMemory();
+    } catch (error) {
+      console.warn('Failed to clear memory:', error);
+    }
+  }, [clearMemory]);
 
   // Create a handleSubmit function to be used in the component
   const [userInput, setUserInput] = useState('');
@@ -337,106 +438,25 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }, [userInput, isLoading, sendMessage]);
 
-  // Function to fetch the conversation summary
-  const fetchSummary = useCallback(async () => {
-    setIsSummaryLoading(true);
-    try {
-      const response = await fetch('/api/memory', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+  // Memory functionality removed
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
 
-      const data = await response.json();
-      setConversationSummary(data);
-      return data;
-    } catch (error) {
-      console.error('Error fetching conversation summary:', error);
-      options.onError?.(error instanceof Error ? error : new Error(String(error)));
-      return null;
-    } finally {
-      setIsSummaryLoading(false);
-    }
-  }, [options]);
 
-  // Function to manually update the conversation summary
-  const updateSummary = useCallback(async () => {
-    setIsSummaryLoading(true);
-    try {
-      const response = await fetch('/api/memory/update-summary', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
 
-      const data = await response.json();
-      // After updating, fetch the full summary to get both summary and recent messages
-      await fetchSummary();
-      return data.summary;
-    } catch (error) {
-      console.error('Error updating conversation summary:', error);
-      options.onError?.(error instanceof Error ? error : new Error(String(error)));
-      return null;
-    } finally {
-      setIsSummaryLoading(false);
-    }
-  }, [fetchSummary, options]);
 
-  // Function to set the maximum token limit
-  const setMaxTokenLimit = useCallback(async (maxTokenLimit: number) => {
-    try {
-      const response = await fetch('/api/memory/token-limit', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ max_token_limit: maxTokenLimit }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const data = await response.json();
-      return data.success;
-    } catch (error) {
-      console.error('Error setting max token limit:', error);
-      options.onError?.(error instanceof Error ? error : new Error(String(error)));
-      return false;
-    }
-  }, [options]);
-
-  // Fetch summary after sending a message
-  useEffect(() => {
-    // Only fetch if there are messages and we're not currently loading a response
-    if (messages.length > 0 && !isLoading) {
-      fetchSummary();
-    }
-  }, [messages, isLoading, fetchSummary]);
 
   return {
     messages,
     isLoading,
     currentAssistantMessage,
     thinkingMessages,
-    conversationSummary,
-    isSummaryLoading,
+    memory,
+
     sendMessage,
     stopGenerating,
     clearMessages,
-    fetchSummary,
-    updateSummary,
-    setMaxTokenLimit,
+
     userInput,
     setUserInput,
     handleSubmit,

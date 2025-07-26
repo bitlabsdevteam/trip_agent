@@ -45,27 +45,58 @@ Alternatively, you can use Docker to run the application without installing Pyth
 
 ## Setup
 
-### Local Setup
+You can run this application in two ways: using Docker (recommended) or setting up locally. Choose the method that best fits your development environment.
 
-1. Clone the repository:
+### Quick Start with Docker (Recommended)
+
+The fastest way to get both the backend and frontend running:
+
+1. **Clone the repository**:
    ```bash
    git clone <repository-url>
    cd trip_agent
    ```
 
-2. Create a virtual environment (optional but recommended):
+2. **Create environment file**:
+   ```bash
+   touch .env
+   ```
+   Add your API keys to the `.env` file (see [Docker Setup](#docker-setup) section for details)
+
+3. **Run with Docker**:
+   ```bash
+   docker compose up --build
+   ```
+
+4. **Access the applications**:
+   - Frontend: http://localhost:3000
+   - Backend API: http://localhost:5001
+
+### Local Development Setup
+
+For local development without Docker:
+
+#### Backend Setup (Flask API)
+
+1. **Clone the repository**:
+   ```bash
+   git clone <repository-url>
+   cd trip_agent
+   ```
+
+2. **Create a virtual environment** (optional but recommended):
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows use `venv\Scripts\activate`
    ```
 
-3. Install dependencies:
+3. **Install backend dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Set up environment variables in a `.env` file:
-   ```
+4. **Set up environment variables** in a `.env` file:
+   ```bash
    # Create a .env file in the project root
    touch .env
    ```
@@ -73,35 +104,80 @@ Alternatively, you can use Docker to run the application without installing Pyth
    Add the following variables to your `.env` file:
    ```
    # Required API Keys
-   OPENAI_API_KEY=your_openai_api_key_here  # If using OpenAI
-   GROQ_API_KEY=your_groq_api_key_here      # If using Groq
+   OPENAI_API_KEY=your_openai_api_key_here
    WEATHER_API_KEY=your_weather_api_key_here
    
    # Optional API Keys
+   GROQ_API_KEY=your_groq_api_key_here
    GOOGLE_API_KEY=your_google_api_key_here
    HUGGINGFACE_API_KEY=your_huggingface_api_key_here
    
    # LLM Configuration
-   # Provider can be "openai", "groq", or "google"
    LLM_PROVIDER=openai
-   # Model name (defaults to provider's default if not specified)
    LLM_MODEL=gpt-4o
-   # Temperature for the LLM (0.0 to 1.0)
    LLM_TEMPERATURE=0.7
-=======
-   OPENAI_API_KEY=your_openai_api_key_here
-   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
->>>>>>> origin/main
    ```
 
-5. Run the Flask app:
+5. **Run the Flask backend**:
    ```bash
    python app.py --port 5001  # Specify port (default is 5000)
    ```
 
-6. Access the application:
+6. **Access the backend**:
    - API Documentation: http://localhost:5001/docs/
    - Test HTML Interface: http://localhost:5001/test_streaming.html
+
+#### Frontend Setup (Next.js)
+
+1. **Navigate to frontend directory**:
+   ```bash
+   cd frontend
+   ```
+
+2. **Install frontend dependencies**:
+   ```bash
+   npm install
+   ```
+
+3. **Create frontend environment file**:
+   ```bash
+   touch .env.local
+   ```
+   
+   Add the following to `.env.local`:
+   ```
+   NEXT_PUBLIC_API_URL=http://localhost:5001
+   ```
+
+4. **Run the Next.js frontend**:
+   ```bash
+   npm run dev
+   ```
+
+5. **Access the frontend**:
+   - Frontend Application: http://localhost:3000
+
+#### Running Both Applications Locally
+
+To run both the backend and frontend simultaneously:
+
+1. **Terminal 1 - Backend**:
+   ```bash
+   # In the root directory
+   python app.py --port 5001
+   ```
+
+2. **Terminal 2 - Frontend**:
+   ```bash
+   # In the frontend directory
+   cd frontend
+   npm run dev
+   ```
+
+3. **Access the full application**:
+   - Frontend: http://localhost:3000 (main application)
+   - Backend API: http://localhost:5001 (API endpoints)
+   - API Documentation: http://localhost:5001/docs/
 
 <<<<<<< HEAD
 ## LLM Configuration
@@ -254,7 +330,7 @@ Provides a comprehensive streaming experience with structured updates including 
 
 ## Docker Setup
 
-The application can be run using Docker and Docker Compose, which simplifies the setup process and ensures consistent behavior across different environments.
+The application can be run using Docker and Docker Compose, which simplifies the setup process and ensures consistent behavior across different environments. This setup includes both the backend Flask API and the frontend Next.js application.
 
 ### Prerequisites for Docker Setup
 
@@ -263,32 +339,135 @@ The application can be run using Docker and Docker Compose, which simplifies the
 
 ### Running with Docker
 
-1. Create a `.env` file in the root directory based on the `.env.example` file:
+1. **Create environment file**: Create a `.env` file in the root directory with your API keys:
    ```bash
-   cp .env.example .env
+   # Create .env file
+   touch .env
+   ```
+   
+   Add the following variables to your `.env` file:
+   ```
+   # Required API Keys
+   OPENAI_API_KEY=your_openai_api_key_here
+   WEATHER_API_KEY=your_weather_api_key_here
+   
+   # Optional API Keys
+   GROQ_API_KEY=your_groq_api_key_here
+   GOOGLE_API_KEY=your_google_api_key_here
+   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
+   
+   # LLM Configuration
+   LLM_PROVIDER=openai
+   LLM_MODEL=gpt-4o
+   LLM_TEMPERATURE=0.7
+   
+   # Backend Configuration
+   BACKEND_URL=http://localhost:5001
+   
+   # Frontend Configuration
+   NEXT_PUBLIC_API_URL=http://localhost:5001
    ```
 
-2. Edit the `.env` file to add your API keys.
-
-3. Build and start the containers:
+2. **Build and start the containers**:
    ```bash
-   docker-compose up --build
+   docker compose up --build
+   ```
+   
+   This command will:
+   - Build the backend Flask application (Python)
+   - Build the frontend Next.js application (Node.js)
+   - Start both services with proper networking
+
+3. **Access the applications**:
+   - **Frontend (Next.js)**: http://localhost:3000
+   - **Backend API (Flask)**: http://localhost:5001
+   - **API Documentation**: http://localhost:5001/docs/
+
+4. **Monitor the logs**: You can view real-time logs from both services:
+   ```bash
+   # View all logs
+   docker compose logs -f
+   
+   # View only backend logs
+   docker compose logs -f backend
+   
+   # View only frontend logs
+   docker compose logs -f frontend
    ```
 
-4. Access the application at http://localhost:3000
-
-5. To stop the application:
+5. **Stop the application**:
    ```bash
-   docker-compose down
+   # Stop and remove containers
+   docker compose down
+   
+   # Stop, remove containers, and remove volumes
+   docker compose down -v
    ```
 
-For more detailed information about the Docker setup, see the [DOCKER.md](DOCKER.md) file.
+### Docker Services
 
-## Conversation Memory
+The `docker-compose.yml` file defines two services:
 
-This project implements a conversation summary memory system that allows the agent to maintain context over longer conversations. The memory system summarizes older interactions while keeping recent messages in full detail, providing a balance between context retention and token efficiency.
+#### Backend Service (Flask API)
+- **Port**: 5001
+- **Technology**: Python 3.11 + Flask
+- **Features**: 
+  - RESTful API with Swagger documentation
+  - LangChain ReAct agent implementation
+  - Multiple LLM provider support
+  - Streaming responses
+  - Weather, time, and city facts tools
 
-For more information about the conversation memory implementation and how to use it, see the [CONVERSATION_MEMORY.md](CONVERSATION_MEMORY.md) file.
+#### Frontend Service (Next.js)
+- **Port**: 3000
+- **Technology**: Node.js 18 + Next.js + TypeScript
+- **Features**:
+  - Modern React-based chat interface
+  - Real-time streaming chat
+  - Responsive design
+  - TypeScript for type safety
+
+### Troubleshooting Docker Setup
+
+1. **Port conflicts**: If ports 3000 or 5001 are already in use, you can modify the ports in `docker-compose.yml`
+
+2. **Build issues**: If you encounter build issues, try:
+   ```bash
+   # Clean build (remove cached layers)
+   docker compose build --no-cache
+   
+   # Remove all containers and rebuild
+   docker compose down
+   docker compose up --build
+   ```
+
+3. **Environment variables**: Ensure your `.env` file is in the root directory and contains all required API keys
+
+4. **Check container status**:
+   ```bash
+   # View running containers
+   docker compose ps
+   
+   # View container logs for debugging
+   docker compose logs backend
+   docker compose logs frontend
+   ```
+
+### Development with Docker
+
+For development purposes, you can run the services individually:
+
+```bash
+# Run only the backend
+docker compose up backend
+
+# Run only the frontend
+docker compose up frontend
+```
+
+The Docker setup includes volume mounts for development, so code changes will be reflected in the running containers.
+
+
 
 ## Contributing
 

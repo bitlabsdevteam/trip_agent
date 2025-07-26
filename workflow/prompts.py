@@ -26,9 +26,6 @@ Your final answer should combine all the information you've gathered into a conc
 
 Begin!
 
-Chat History:
-{chat_history}
-
 Question: {input}
 Thought: {agent_scratchpad}"""
 

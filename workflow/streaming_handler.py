@@ -26,12 +26,33 @@ class StreamingHandler(BaseCallbackHandler):
         self.current_section = "thinking"
     
     async def on_llm_new_token(self, token: str, **kwargs):
-        """Run on new LLM token."""
-        if self.current_section == "thinking":
+        """Run on new LLM token with structured output parsing."""
+        # Check for <think> tags to separate reasoning from response
+        if "<think>" in token or "</think>" in token:
+            # Handle thinking tag transitions
+            if "<think>" in token:
+                self.current_section = "thinking"
+                # Remove the <think> tag from the token
+                token = token.replace("<think>", "")
+            elif "</think>" in token:
+                self.current_section = "response"
+                # Remove the </think> tag and any content before it
+                parts = token.split("</think>")
+                if len(parts) > 1:
+                    # Add the thinking part to thinking buffer
+                    if parts[0]:
+                        self.thinking_buffer += parts[0]
+                        await self.queue.put({"type": "thinking", "content": self._escape_special_chars(parts[0])})
+                    # Continue with the response part
+                    token = parts[1]
+                else:
+                    token = ""
+        
+        if self.current_section == "thinking" and token:
             # Accumulate thinking tokens and stream them
             self.thinking_buffer += token
             await self.queue.put({"type": "thinking", "content": self._escape_special_chars(token)})
-        elif self.current_section == "response":
+        elif self.current_section == "response" and token:
             # Accumulate response tokens and stream them
             self.response_buffer += token
             await self.queue.put({"type": "token", "content": self._escape_special_chars(token)})
@@ -105,43 +126,142 @@ class StreamingHandler(BaseCallbackHandler):
             if hasattr(self, 'agent') and hasattr(self.agent, 'memory') and hasattr(self.agent.memory, 'chat_memory'):
                 self.agent.memory.chat_memory.add_message(AIMessage(content=final_answer))
         
-        # When the chain ends, we can send the structured format
+        # Get conversation summary and history from memory for frontend
+        conversation_summary = ""
+        conversation_history = []
+        if hasattr(self, 'agent') and hasattr(self.agent, 'memory'):
+            try:
+                # Load memory variables to get summary and history
+                memory_vars = self.agent.memory.load_memory_variables({})
+                
+                # Extract summary if available (ConversationSummaryBufferMemory provides this)
+                if 'history' in memory_vars:
+                    if isinstance(memory_vars['history'], str):
+                        conversation_summary = memory_vars['history']
+                    elif isinstance(memory_vars['history'], list):
+                        # Convert message list to readable format
+                        for msg in memory_vars['history']:
+                            if hasattr(msg, 'content'):
+                                msg_type = "human" if hasattr(msg, 'type') and msg.type == "human" else "ai"
+                                conversation_history.append({
+                                    "type": msg_type,
+                                    "content": msg.content
+                                })
+                
+                # Get the moving summary if it exists (for ConversationSummaryBufferMemory)
+                if hasattr(self.agent.memory, 'moving_summary_buffer') and self.agent.memory.moving_summary_buffer:
+                    conversation_summary = self.agent.memory.moving_summary_buffer
+                    
+            except Exception as e:
+                print(f"Error loading memory variables: {e}")
+        
+        # When the chain ends, we can send the structured format with memory info
         structured_output = {
             "type": "structured_output",
             "content": {
                 "thinking": self.thinking_buffer.strip(),
                 "function_calls": self.function_calls,
-                "response": self.response_buffer.strip() # Include any response content that might already be available
+                "response": self.response_buffer.strip(),
+                "conversation_summary": conversation_summary,
+                "conversation_history": conversation_history
             }
         }
         
         await self.queue.put(structured_output)
         
     async def on_chain_error(self, error: Union[Exception, KeyboardInterrupt], **kwargs):
-        """Run when chain errors."""
+        """Run when chain errors with enhanced parsing."""
         error_str = str(error)
         await self.queue.put({"type": "error", "content": self._escape_special_chars(error_str)})
         
-        # Check if this is a parsing error and try to extract the content
-        if "Could not parse LLM output" in error_str:
-            # Try to extract the actual content from the error message
-            import re
-            match = re.search(r'Could not parse LLM output: `(.+)`', error_str)
-            if match and match[1]:
-                # Extract the actual content from the error message
-                content = match[1]
-                self.response_buffer = content
-                
-                # Send the extracted content as a structured output
-                structured_output = {
-                    "type": "structured_output",
-                    "content": {
-                        "thinking": self.thinking_buffer.strip(),
-                        "function_calls": self.function_calls,
-                        "response": content.strip()
-                    }
+        # Enhanced error patterns matching frontend implementation
+        import re
+        patterns = [
+            r'Could not parse LLM output: `([\s\S]+?)`',
+            r'Stream error: "Could not parse LLM output: `([\s\S]+?)`',
+            r'OUTPUT_PARSING_FAILURE[\s\S]*?`([\s\S]+?)`'
+        ]
+        
+        extracted_content = None
+        for pattern in patterns:
+            match = re.search(pattern, error_str)
+            if match:
+                extracted_content = match.group(1)
+                break
+        
+        if extracted_content:
+            # Enhanced thinking extraction with multiple patterns
+            thinking_content = ""
+            response_content = extracted_content
+            
+            # Try different thinking tag patterns
+            thinking_patterns = [
+                r'<think>([\s\S]*?)</think>',
+                r'<thinking>([\s\S]*?)</thinking>',
+                r'Thought:([\s\S]*?)(?=Action:|Final Answer:|$)'
+            ]
+            
+            for think_pattern in thinking_patterns:
+                thinking_match = re.search(think_pattern, extracted_content, re.IGNORECASE)
+                if thinking_match:
+                    thinking_content = thinking_match.group(1).strip()
+                    # Remove thinking content from response
+                    response_content = re.sub(think_pattern, '', extracted_content, flags=re.IGNORECASE).strip()
+                    break
+            
+            # Clean up response content
+            response_content = response_content.strip()
+            if not response_content:
+                response_content = "I encountered a parsing error but was able to extract some content. Please try rephrasing your question."
+            
+            # Update buffers
+            self.thinking_buffer = thinking_content
+            self.response_buffer = response_content
+            
+            # Get conversation summary and history from memory for error case
+            conversation_summary = ""
+            conversation_history = []
+            if hasattr(self, 'agent') and hasattr(self.agent, 'memory'):
+                try:
+                    # Load memory variables to get summary and history
+                    memory_vars = self.agent.memory.load_memory_variables({})
+                    
+                    # Extract summary if available (ConversationSummaryBufferMemory provides this)
+                    if 'history' in memory_vars:
+                        if isinstance(memory_vars['history'], str):
+                            conversation_summary = memory_vars['history']
+                        elif isinstance(memory_vars['history'], list):
+                            # Convert message list to readable format
+                            for msg in memory_vars['history']:
+                                if hasattr(msg, 'content'):
+                                    msg_type = "human" if hasattr(msg, 'type') and msg.type == "human" else "ai"
+                                    conversation_history.append({
+                                        "type": msg_type,
+                                        "content": msg.content
+                                    })
+                    
+                    # Get the moving summary if it exists (for ConversationSummaryBufferMemory)
+                    if hasattr(self.agent.memory, 'moving_summary_buffer') and self.agent.memory.moving_summary_buffer:
+                        conversation_summary = self.agent.memory.moving_summary_buffer
+                        
+                except Exception as e:
+                    print(f"Error loading memory variables in error handler: {e}")
+            
+            # Send the extracted content as a structured output
+            structured_output = {
+                "type": "structured_output",
+                "content": {
+                    "thinking": thinking_content,
+                    "function_calls": self.function_calls,
+                    "response": response_content,
+                    "conversation_summary": conversation_summary,
+                    "conversation_history": conversation_history
                 }
-                await self.queue.put(structured_output)
+            }
+            await self.queue.put(structured_output)
+            
+            # Also send the content as a token to ensure it's displayed
+            await self.queue.put({"type": "token", "content": self._escape_special_chars(response_content)})
     
     def _escape_special_chars(self, text):
         """Escape special characters for JSON."""
@@ -160,6 +280,17 @@ class StreamingHandler(BaseCallbackHandler):
                 yield token_data
                 self.queue.task_done()
             except asyncio.CancelledError:
+                break
+            except RuntimeError as e:
+                if "Event loop is closed" in str(e):
+                    # Event loop is closed, stop iteration gracefully
+                    break
+                else:
+                    # Re-raise other RuntimeErrors
+                    raise
+            except Exception as e:
+                # Log other exceptions and break to prevent infinite loops
+                print(f"Error in streaming handler aiter: {e}")
                 break
 
 def get_streaming_handler(agent=None):

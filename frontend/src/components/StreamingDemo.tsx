@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useChat } from '../hooks/useChat';
+import MemoryDisplay from './MemoryDisplay';
 
 export default function StreamingDemo() {
   const {
@@ -13,7 +14,8 @@ export default function StreamingDemo() {
     isLoading,
     stopGenerating,
     clearMessages,
-    currentAssistantMessage
+    currentAssistantMessage,
+    memory
   } = useChat();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -36,6 +38,7 @@ export default function StreamingDemo() {
       
       <div className="flex-1 overflow-auto border-t border-gray-200 pb-2">
         <div className="max-w-6xl mx-auto w-full p-4 space-y-6">
+          <MemoryDisplay memory={memory} onClearMemory={clearMessages} />
           {messages.map((message, index) => (
             <div 
               key={index} 

@@ -40,7 +40,7 @@ class LLMFactory:
     @staticmethod
     def _create_openai_llm(model_name: Optional[str] = None, **kwargs) -> ChatOpenAI:
         """Create an OpenAI LLM instance."""
-        default_model = "gpt-4o"
+        default_model = "gpt-4o-mini"
         model = model_name or default_model
         
         # Get API key from environment variable
@@ -48,7 +48,7 @@ class LLMFactory:
         
         # Set default parameters if not provided
         temperature = kwargs.pop("temperature", 0.7)
-        
+        print('OpenAI is being use')
         return ChatOpenAI(
             model=model,
             temperature=temperature,
@@ -69,7 +69,7 @@ class LLMFactory:
         
         # Set default parameters if not provided
         temperature = kwargs.pop("temperature", 0.7)
-        
+        print('deepseek is being use')
         return ChatGroq(
             model=model,
             temperature=temperature,
@@ -88,7 +88,7 @@ class LLMFactory:
         
         # Set default parameters if not provided
         temperature = kwargs.pop("temperature", 0.7)
-        
+        print('Google is being use')
         return ChatGoogleGenerativeAI(
             model=model,
             temperature=temperature,

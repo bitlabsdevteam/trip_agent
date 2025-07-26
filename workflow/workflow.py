@@ -67,68 +67,179 @@ class Workflow:
         return {
             "agent_response": agent_response,
             "raw_response": result,
-            "conversation_history": self.agent.memory.chat_memory.messages if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") else []
+            "conversation_history": []
         }
         
     def invoke(self, user_input: str):
         # Method to match the app.py implementation - preferred in Langchain and Langgraph
         
-        # Get the last message from chat history if available
-        last_message = None
-        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
-            messages = self.agent.memory.chat_memory.messages
-            # Find the last AI message
-            for msg in reversed(messages):
-                if isinstance(msg, AIMessage):
-                    last_message = msg.content
-                    break
-        
-        # Include the last message in the input if available
-        enhanced_input = user_input
-        if last_message:
-            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
-        
-        # Use the Runnable chain to process the enhanced input
-        formatted_result = self.agent_chain.invoke({"input": enhanced_input})
-        
-        # Create function calls from the formatted result
-        function_calls = []
-        for call in formatted_result["function_calls"]:
-            function_calls.append(FunctionCall(
-                tool=call["tool"],
-                parameters=call["parameters"]
-            ))
-        
-        # Create the AgentResponse object
-        agent_response = AgentResponse(
-            thinking=formatted_result["thinking"],
-            function_calls=function_calls,
-            response=formatted_result["response"]
-        )
-        
-        # Create a result object with the expected attributes
-        class ResultObject:
-            def __init__(self, final_response, tool_outputs, conversation_history, agent_response):
-                self.final_response = final_response
-                self.tool_outputs = tool_outputs
-                self.conversation_history = conversation_history
-                self.agent_response = agent_response
-        
-        # Convert LangChain message objects to serializable dictionaries
-        serializable_history = []
-        for message in self.agent.memory.chat_memory.messages:
-            # Extract the content and type from each message object
-            serializable_history.append({
-                "type": message.__class__.__name__,
-                "content": message.content
-            })
-        
-        return ResultObject(
-            final_response=formatted_result["response"],
-            tool_outputs={"reasoning": formatted_result["thinking"], "steps": formatted_result["function_calls"]},
-            conversation_history=serializable_history,
-            agent_response=agent_response.model_dump()
-        )
+        try:
+            # Use the agent's process_input method which handles memory
+            result = self.agent.process_input(user_input)
+            
+            # Parse and separate reasoning from final output if using <think> tags
+            response = result["response"]
+            thinking = result.get("reasoning", "")
+            
+            # Check for <think> tag format in response
+            import re
+            think_match = re.search(r'<think>([\s\S]+?)</think>([\s\S]*)', response)
+            if think_match:
+                thinking = think_match.group(1).strip()
+                response = think_match.group(2).strip()
+            
+            # Create function calls from the result
+            function_calls = []
+            if "function_calls" in result:
+                for call in result["function_calls"]:
+                    function_calls.append(FunctionCall(
+                        tool=call["tool"],
+                        parameters=call["parameters"]
+                    ))
+            
+            # Create the AgentResponse object with structured output
+            agent_response = AgentResponse(
+                thinking=thinking,
+                function_calls=function_calls,
+                response=response
+            )
+            
+            # Create a result object with the expected attributes
+            class ResultObject:
+                def __init__(self, final_response, tool_outputs, conversation_history, agent_response):
+                    self.final_response = final_response
+                    self.tool_outputs = tool_outputs
+                    self.conversation_history = conversation_history
+                    self.agent_response = agent_response
+            
+            # Get conversation history and summary from memory
+            try:
+                memory_vars = self.agent.memory.load_memory_variables({})
+                conversation_history = []
+                
+                # Get the memory buffer summary and recent messages
+                if 'history' in memory_vars and memory_vars['history']:
+                    # ConversationSummaryBufferMemory provides history as a string
+                    history_content = memory_vars['history']
+                    conversation_history.append({
+                        "type": "summary",
+                        "content": history_content
+                    })
+                
+                # Also get the moving summary buffer if available
+                summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
+                if summary:
+                    conversation_history.append({
+                        "type": "moving_summary",
+                        "content": summary
+                    })
+                
+                # Get recent chat messages
+                chat_history = self.agent.memory.chat_memory.messages
+                for message in chat_history:
+                    if hasattr(message, 'content'):
+                        message_type = "human" if hasattr(message, 'type') and message.type == "human" else "ai"
+                        conversation_history.append({
+                            "type": message_type,
+                            "content": message.content
+                        })
+                        
+            except Exception as e:
+                print(f"Error loading conversation history: {e}")
+                conversation_history = []
+
+            return ResultObject(
+                final_response=response,
+                tool_outputs={"reasoning": thinking, "steps": result.get("tool_calls", [])},
+                conversation_history=conversation_history,
+                agent_response=agent_response.model_dump()
+            )
+            
+        except Exception as e:
+            # Enhanced error handling for parsing failures
+            error_str = str(e)
+            
+            # Try to extract content from OUTPUT_PARSING_FAILURE errors
+            if "Could not parse LLM output" in error_str or "OUTPUT_PARSING_FAILURE" in error_str:
+                import re
+                patterns = [
+                    r'Could not parse LLM output: `([\s\S]+?)`',
+                    r'Stream error: "Could not parse LLM output: `([\s\S]+?)`',
+                    r'OUTPUT_PARSING_FAILURE[\s\S]*?`([\s\S]+?)`'
+                ]
+                
+                extracted_content = None
+                for pattern in patterns:
+                    match = re.search(pattern, error_str, re.DOTALL)
+                    if match and match.group(1):
+                        extracted_content = match.group(1)
+                        break
+                
+                if extracted_content:
+                    # Parse thinking and response from extracted content
+                    thinking = ""
+                    response = extracted_content
+                    
+                    # Handle <think> tags in extracted content
+                    think_match = re.search(r'<think>([\s\S]+?)</think>([\s\S]*)', extracted_content)
+                    if think_match:
+                        thinking = think_match.group(1).strip()
+                        response = think_match.group(2).strip()
+                    
+                    # Save to memory
+                    self.agent.memory.save_context(
+                        {"input": user_input},
+                        {"output": response}
+                    )
+                    
+                    # Create structured response
+                    agent_response = AgentResponse(
+                        thinking=thinking or "I processed your request despite a formatting issue.",
+                        function_calls=[],
+                        response=response
+                    )
+                    
+                    class ResultObject:
+                        def __init__(self, final_response, tool_outputs, conversation_history, agent_response):
+                            self.final_response = final_response
+                            self.tool_outputs = tool_outputs
+                            self.conversation_history = conversation_history
+                            self.agent_response = agent_response
+                    
+                    # Get conversation history and summary from memory for error case
+                    try:
+                        memory_vars = self.agent.memory.load_memory_variables({})
+                        conversation_history = []
+                        
+                        # Get the memory buffer summary and recent messages
+                        if 'history' in memory_vars and memory_vars['history']:
+                            history_content = memory_vars['history']
+                            conversation_history.append({
+                                "type": "summary",
+                                "content": history_content
+                            })
+                        
+                        # Also get the moving summary buffer if available
+                        summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
+                        if summary:
+                            conversation_history.append({
+                                "type": "moving_summary",
+                                "content": summary
+                            })
+                            
+                    except Exception as mem_error:
+                        print(f"Error loading conversation history in error handler: {mem_error}")
+                        conversation_history = []
+                    
+                    return ResultObject(
+                        final_response=response,
+                        tool_outputs={"reasoning": thinking, "steps": []},
+                        conversation_history=conversation_history,
+                        agent_response=agent_response.model_dump()
+                    )
+            
+            # If we can't extract content, raise the original error
+            raise e
         
     def execute(self, user_input: str):
         # Legacy method, maintained for backward compatibility
@@ -145,20 +256,33 @@ class Workflow:
         Yields:
             tuple: (stream_mode, chunk) pairs where chunk is the streamed data
         """
-        # Get the last message from chat history if available
-        last_message = None
-        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
-            messages = self.agent.memory.chat_memory.messages
-            # Find the last AI message
-            for msg in reversed(messages):
-                if isinstance(msg, AIMessage):
-                    last_message = msg.content
-                    break
-        
-        # Include the last message in the input if available
-        enhanced_input = user_input
-        if last_message:
-            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        # Get conversation summary and history from memory using load_memory_variables
+        try:
+            memory_vars = self.agent.memory.load_memory_variables({})
+            conversation_context = ""
+            
+            # Handle ConversationSummaryBufferMemory output (string format)
+            if 'history' in memory_vars and memory_vars['history']:
+                conversation_context = memory_vars['history']
+            
+            # Check for moving summary buffer
+            summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
+            
+            # Memory state is working correctly - debug prints removed
+            
+            # Construct enhanced input with proper context
+            if summary and conversation_context:
+                enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nRecent Conversation:\n{conversation_context}\n\nCurrent Question: {user_input}"
+            elif summary:
+                enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nCurrent Question: {user_input}"
+            elif conversation_context:
+                enhanced_input = f"Conversation History:\n{conversation_context}\n\nCurrent Question: {user_input}"
+            else:
+                enhanced_input = f"Current Question: {user_input}"
+                
+        except Exception as e:
+            print(f"Error loading memory variables: {e}")
+            enhanced_input = f"Current Question: {user_input}"
         
         # Stream from the agent executor with enhanced input
         for chunk in self.agent.agent_executor.stream(
@@ -173,6 +297,12 @@ class Workflow:
             # Format the chunk based on its type
             formatted_chunk = self._format_chunk(mode, chunk)
             yield mode, formatted_chunk
+        
+        # Save the conversation to memory after streaming
+        self.agent.memory.save_context(
+            {"input": user_input},
+            {"output": "[Streaming response completed]"}
+        )
     
     async def astream(self, user_input: str, stream_mode=None):
         """Asynchronously stream the workflow execution results.
@@ -184,20 +314,33 @@ class Workflow:
         Yields:
             tuple: (stream_mode, chunk) pairs where chunk is the streamed data
         """
-        # Get the last message from chat history if available
-        last_message = None
-        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
-            messages = self.agent.memory.chat_memory.messages
-            # Find the last AI message
-            for msg in reversed(messages):
-                if isinstance(msg, AIMessage):
-                    last_message = msg.content
-                    break
-        
-        # Include the last message in the input if available
-        enhanced_input = user_input
-        if last_message:
-            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        # Get conversation summary and history from memory using load_memory_variables
+        try:
+            memory_vars = self.agent.memory.load_memory_variables({})
+            conversation_context = ""
+            
+            # Handle ConversationSummaryBufferMemory output (string format)
+            if 'history' in memory_vars and memory_vars['history']:
+                conversation_context = memory_vars['history']
+            
+            # Check for moving summary buffer
+            summary = getattr(self.agent.memory, 'moving_summary_buffer', '')
+            
+            # Memory state is working correctly - debug prints removed
+            
+            # Construct enhanced input with proper context
+            if summary and conversation_context:
+                enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nRecent Conversation:\n{conversation_context}\n\nCurrent Question: {user_input}"
+            elif summary:
+                enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nCurrent Question: {user_input}"
+            elif conversation_context:
+                enhanced_input = f"Conversation History:\n{conversation_context}\n\nCurrent Question: {user_input}"
+            else:
+                enhanced_input = f"Current Question: {user_input}"
+                
+        except Exception as e:
+            print(f"Error loading memory variables: {e}")
+            enhanced_input = f"Current Question: {user_input}"
         
         # Stream from the agent executor with enhanced input
         async for chunk in self.agent.agent_executor.astream(
@@ -212,6 +355,12 @@ class Workflow:
             # Format the chunk based on its type
             formatted_chunk = self._format_chunk(mode, chunk)
             yield mode, formatted_chunk
+        
+        # Save the conversation to memory after streaming
+        self.agent.memory.save_context(
+            {"input": user_input},
+            {"output": "[Streaming response completed]"}
+        )
             
     async def astream_tokens(self, user_input: str, callbacks=None):
         """Asynchronously stream tokens using agent.ainvoke with callbacks.
@@ -236,26 +385,51 @@ class Workflow:
             if hasattr(callback, 'agent') and callback.agent is None:
                 callback.agent = self.agent
         
-        # Get the last message from chat history if available
-        last_message = None
-        if hasattr(self.agent, "memory") and hasattr(self.agent.memory, "chat_memory") and self.agent.memory.chat_memory.messages:
-            messages = self.agent.memory.chat_memory.messages
-            # Find the last AI message
-            for msg in reversed(messages):
-                if isinstance(msg, AIMessage):
-                    last_message = msg.content
-                    break
-        
-        # Include the last message in the input if available
-        enhanced_input = user_input
-        if last_message:
-            enhanced_input = f"{user_input}\n\nFor context, my last response was: {last_message}"
+        # Get conversation summary and history from memory using load_memory_variables
+        try:
+            memory_vars = self.agent.memory.load_memory_variables({})
+            conversation_context = ""
+            
+            # Handle ConversationSummaryBufferMemory output
+            if 'history' in memory_vars:
+                if isinstance(memory_vars['history'], str):
+                    # String format - includes summary and recent messages
+                    conversation_context = memory_vars['history']
+                elif isinstance(memory_vars['history'], list):
+                    # Message list format - convert to string
+                    for message in memory_vars['history']:
+                        if hasattr(message, 'content'):
+                            role = "Human" if hasattr(message, 'type') and message.type == "human" else "Assistant"
+                            conversation_context += f"{role}: {message.content}\n"
+            
+            # Check for moving summary buffer (ConversationSummaryBufferMemory specific)
+            if hasattr(self.agent.memory, 'moving_summary_buffer') and self.agent.memory.moving_summary_buffer:
+                summary = self.agent.memory.moving_summary_buffer
+                if conversation_context:
+                    enhanced_input = f"Previous Conversation Summary:\n{summary}\n\nRecent Conversation:\n{conversation_context}\nCurrent Question: {user_input}"
+                else:
+                    enhanced_input = f"Previous Conversation Summary:\n{summary}\nCurrent Question: {user_input}"
+            else:
+                enhanced_input = f"Conversation History:\n{conversation_context}\nCurrent Question: {user_input}" if conversation_context else f"Current Question: {user_input}"
+                
+        except Exception as e:
+            print(f"Error loading memory variables: {e}")
+            # Fallback to basic input
+            enhanced_input = f"Current Question: {user_input}"
         
         # Run the agent asynchronously and return the final result
-        return await self.agent.agent_executor.ainvoke({"input": enhanced_input}, config=config)
+        result = await self.agent.agent_executor.ainvoke({"input": enhanced_input}, config=config)
+        
+        # Save the conversation to memory after completion
+        self.agent.memory.save_context(
+            {"input": user_input},
+            {"output": result.get("output", "[Response completed]")}
+        )
+        
+        return result
     
     def _format_chunk(self, mode, chunk):
-        """Format a chunk based on its content.
+        """Format a chunk based on its content with structured output parsing.
         
         Args:
             mode (str): The determined mode ("updates" or "messages")
@@ -275,21 +449,44 @@ class Workflow:
                         observation = last_step[1]
                         
                         if hasattr(action, "tool") and hasattr(action, "tool_input") and hasattr(action, "log"):
+                            # Parse thinking from log if it contains <think> tags
+                            thinking = action.log
+                            import re
+                            think_match = re.search(r'<think>([\s\S]+?)</think>', action.log)
+                            if think_match:
+                                thinking = think_match.group(1).strip()
+                            
                             return {
                                 "type": "tool_usage",
                                 "tool": action.tool,
                                 "input": action.tool_input,
-                                "thought": action.log
+                                "thought": thinking
                             }
             return {"type": "thinking", "content": str(chunk)}
         
         elif mode == "messages":
-            # Format message chunks (LLM tokens)
+            # Format message chunks (LLM tokens) with reasoning separation
+            content = ""
             if hasattr(chunk, "content"):
-                return {"type": "token", "content": chunk.content}
+                content = chunk.content
             elif isinstance(chunk, dict) and "output" in chunk:
-                return {"type": "token", "content": chunk.get("output", "")}
-            return {"type": "token", "content": str(chunk)}
+                content = chunk.get("output", "")
+            else:
+                content = str(chunk)
+            
+            # Check for <think> tags in streaming content
+            import re
+            think_match = re.search(r'<think>([\s\S]+?)</think>([\s\S]*)', content)
+            if think_match:
+                thinking = think_match.group(1).strip()
+                response = think_match.group(2).strip()
+                return {
+                    "type": "structured_token",
+                    "thinking": thinking,
+                    "content": response
+                }
+            
+            return {"type": "token", "content": content}
         
         # Default formatting for unknown modes
         return {"type": "unknown", "content": str(chunk)}
